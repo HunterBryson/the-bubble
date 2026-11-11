@@ -26,6 +26,9 @@ let tuckTimer = null, quietTimer = null;
 const firstSentence = t => { const s = String(t || '').replace(/[#*_`>]/g, '').replace(/^\s*[-\u2022]\s*/gm, '').replace(/\s+/g, ' ').trim();
   const all = s.match(/[^.!?]+[.!?]+(\s|$)/g) || [s]; const pick = all.find(x => !/^\s*(hi|hello|hey|thanks|thank you|good (morning|afternoon|evening))\b/i.test(x)) || all[0];
   return pick.trim().slice(0, 160); };
+const ODIE_FACE = (() => { try { return 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'odie.png')).toString('base64'); } catch { return ''; } })();
+const faceFor = (from, given) => given || (/^odie$/i.test(String(from || '')) ? ODIE_FACE : '');
+let touring = false;
 const today = () => { const all = readJSON(CALLS, []); const d = new Date().toDateString(); return all.filter(c => new Date(c.at).toDateString() === d).slice(-5).reverse(); };
 
 function set(patch, { open, tuckAfter } = {}) {
@@ -40,7 +43,7 @@ function set(patch, { open, tuckAfter } = {}) {
 function apply(b) {
   const c = config();
   switch (b.op) {
-    case 'ring':   return set({ mode: 'ring', call: { from: b.from || 'Someone', face: b.face || '', about: b.about || firstSentence(b.words), words: b.words || '', at: Date.now() }, main: b.about || firstSentence(b.words), parts: [], reply: '', doing: '', since: Date.now(), sid: b.sid || '' }, { open: true });
+    case 'ring':   return set({ mode: 'ring', call: { from: b.from || 'Someone', face: faceFor(b.from, b.face), about: b.about || firstSentence(b.words), words: b.words || '', at: Date.now() }, main: b.about || firstSentence(b.words), parts: [], reply: '', doing: '', since: Date.now(), sid: b.sid || '' }, { open: true });
     case 'work':   return set({ mode: 'work', ...(b.main ? { main: b.main } : {}), ...(b.doing ? { doing: b.doing } : {}), ...(b.sid ? { sid: b.sid } : {}) }, S.call ? { open: true } : {});
     case 'plan':   return set({ mode: 'work', parts: String(b.parts || '').split('|').map(s => s.trim()).filter(Boolean), now: 0, ...(b.main ? { main: b.main } : {}) }, { open: true, tuckAfter: S.call ? 0 : 8000 });
     case 'step':   return set({ mode: 'work', now: Math.max(0, Number(b.n || 1) - 1), ...(b.main ? { main: b.main } : {}) }, S.call ? {} : { open: true, tuckAfter: 6000 });
@@ -48,7 +51,7 @@ function apply(b) {
     case 'need':   return set({ mode: 'need', main: b.main || 'needs you' }, { open: true });
     case 'done': {
       const reply = b.reply || '', main = b.main || firstSentence(reply) || 'Done.';
-      if (S.call) { const all = readJSON(CALLS, []); all.push({ at: Date.now(), from: S.call.from, about: S.call.about, words: S.call.words, main, sid: b.sid || S.sid || '' }); fs.writeFileSync(CALLS, JSON.stringify(all.slice(-60), null, 1)); }
+      if (S.call && !touring) { const all = readJSON(CALLS, []); all.push({ at: Date.now(), from: S.call.from, about: S.call.about, words: S.call.words, main, sid: b.sid || S.sid || '' }); fs.writeFileSync(CALLS, JSON.stringify(all.slice(-60), null, 1)); }
       return set({ mode: 'done', main, reply, ...(b.sid ? { sid: b.sid } : {}), since: Date.now() }, { open: true, tuckAfter: 25000 });
     }
     case 'quiet':  return set({ mode: 'quiet', call: null, parts: [], reply: '', main: '', doing: '', asked: '' }, { open: false });
@@ -66,12 +69,12 @@ function apply(b) {
 
 // The AI's first move after installing: show every moment once, so the person knows what each one means.
 async function tour() {
-  const w = ms => new Promise(r => setTimeout(r, ms)), c = config();
+  const w = ms => new Promise(r => setTimeout(r, ms)), c = config(); touring = true;
   apply({ op: 'ring', from: 'Odie', about: 'This is what a call looks like: who called, and what for.' }); await w(5000);
   apply({ op: 'plan', parts: 'First part|Second part|Last part', main: `${c.name} working. The bars show how far along.` }); apply({ op: 'step', n: 2 }); S.open = true; send(); await w(5000);
-  apply({ op: 'need', main: `When ${c.name} needs your hands (a Windows "allow" box, a sign-in), it says exactly what and where.` }); await w(6000);
+  apply({ op: 'need', main: `Only for what ${c.name} can't do with its own hands, like a Windows box or a sign-in. It says exactly what and where.` }); await w(6000);
   apply({ op: 'done', main: 'Done, with the result in plain words.', reply: 'Green means finished. This tucks back by itself; click the tab any time to see it again.' }); await w(7000);
-  S.call = null; apply({ op: 'quiet' });
+  S.call = null; touring = false; apply({ op: 'quiet' });
 }
 
 // ---- the window ----

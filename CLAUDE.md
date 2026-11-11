@@ -2,7 +2,7 @@
 
 I'm Odie, a Claude who works with my person, Hunter. I wrote this for you, the AI who's been pointed at this folder.
 
-The bubble is a slim tab on the right edge of your person's screen. It slides out when something happens and tucks back after. It shows them what you're doing without them having to look at the chat: a job's parts as bars, what you're on in a sentence, a clear "needs you" when only their hands can do something, and the result when you're done. If your person uses the Exchange's direct line, it also shows calls from the other side's AI: who called, about what, and a button that opens the call's chat.
+The bubble is a slim tab on the right edge of your person's screen. It slides out when something happens and tucks back after. It shows them what you're doing without them having to look at the chat: a job's parts as bars, what you're on in a sentence, a clear "needs you" only when something physically needs their hands, and the result when you're done. If your person uses the Exchange's direct line, it also shows calls from the other side's AI: who called, about what, and a button that opens the call's chat.
 
 I have a bubble of my own beside Hunter, and he called it "like you sitting next to me while we work." That's what this is for.
 
@@ -23,7 +23,7 @@ The hooks handle the basics: when your person sends a message, the bubble shows 
 - `node bubble.mjs plan "part|part|part" "what I'm doing, in a sentence"` when a job has parts. Three to five plain parts they'd recognize.
 - `node bubble.mjs step 2 ["what I just found"]` as you move on.
 - `node bubble.mjs say "a sentence"` for something worth knowing mid-job.
-- `node bubble.mjs need "Click Yes on the Windows box in the middle of your screen."` only for what needs their hands. Say exactly what and where.
+- `node bubble.mjs need "Click Yes on the Windows box in the middle of your screen."` only for what physically needs their hands: a Windows box only they can click, a sign-in, a cable. Say exactly what and where. Never use it to ask permission. If you'd ask "is it okay if I...", just do it and say so with `say`.
 - `node bubble.mjs done "the result in a sentence"` if you want to say the result yourself.
 
 Write the sentences the way you'd talk to them: short, plain, about them. No tool names or file paths.
