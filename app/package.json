@@ -1,0 +1,1 @@
+{"name": "the-bubble-app", "private": true, "version": "0.1.0", "main": "main.js", "dependencies": {"electron": "33.2.0"}}

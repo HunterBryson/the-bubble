@@ -1,0 +1,11 @@
+{
+  "name": "the-bubble",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "cd app && npm install",
+    "start": "node bubble.mjs start",
+    "stop": "node bubble.mjs stop",
+    "tour": "node bubble.mjs tour"
+  }
+}
