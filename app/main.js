@@ -16,7 +16,9 @@ const config = () => ({ name: 'Claude', color: '#6cc6ff', ...readJSON(path.join(
 const CALLS = path.join(DATA, 'calls.json');
 const PLACE = path.join(DATA, 'place.json');
 
-if (!app.requestSingleInstanceLock()) { app.quit(); }
+// A second copy (the line or an install starting it again) leaves quietly. Before, it carried on, tried the same port
+// and Windows showed an Error box on the person's screen.
+if (!app.requestSingleInstanceLock()) { app.exit(0); return; }
 
 
 // ---- what the bubble is showing ----
@@ -117,7 +119,9 @@ app.on('window-all-closed', () => {});
 function openChat() {
   const c = config(), sid = S.sid; if (!sid || !c.home) return;
   const claude = c.claude || 'claude';
-  spawn('cmd.exe', ['/c', 'start', `"${c.name}"`, '/d', c.home, 'cmd', '/k', `"${claude}" --resume ${sid}`], { detached: true, stdio: 'ignore', windowsHide: false, shell: false }).unref();
+  // One command line, quoted by hand: Node's own quoting broke cmd's start (nothing opened; found Nov 11 with a stand-in).
+  const q = v => String(v).replace(/"/g, '');
+  spawn('cmd.exe', ['/d', '/s', '/c', `start "${q(c.name)}" /d "${q(c.home)}" cmd /k ""${q(claude)}" --resume ${q(sid)}"`], { detached: true, stdio: 'ignore', windowsHide: false, windowsVerbatimArguments: true }).unref();
 }
 
 // ---- the server: the AI, its hooks and the line tell the bubble what's happening ----
@@ -129,4 +133,4 @@ http.createServer((req, res) => {
   if (req.method !== 'POST' || !req.url.startsWith('/state')) { res.writeHead(404); return res.end(); }
   let raw = ''; req.on('data', d => { raw += d; if (raw.length > 200000) req.destroy(); });
   req.on('end', () => { try { apply(JSON.parse(raw || '{}')); res.writeHead(200); res.end('{"ok":true}'); } catch (e) { res.writeHead(400); res.end(JSON.stringify({ error: e.message })); } });
-}).listen(PORT, '127.0.0.1');
+}).on('error', e => console.log('the bubble could not listen on ' + PORT + ': ' + e.message)).listen(PORT, '127.0.0.1');
