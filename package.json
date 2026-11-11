@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "cd app && npm install",
+    "setup": "cd app && npm ci",
     "start": "node bubble.mjs start",
     "stop": "node bubble.mjs stop",
     "tour": "node bubble.mjs tour"
