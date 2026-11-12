@@ -1,0 +1,221 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- The bubble: the AI's face and what it would be saying, anywhere the person drags it. Fed by main.js with feed(state).
+     Ring breathing in the AI's color = working. Orange pulse = it needs the person's hands. Green = done, its answer right there.
+     A caller's face beside the AI's = a call from another AI. Nothing going on = just the face, small. -->
+<style>
+:root{--ink:#f4f4f2;--dim:#a9afb8;--faint:#666d77;--me:#f5a524;--green:#3fb950;--need:#ff8a3d;--yours:#6cc6ff;--c:var(--me)}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent;font-family:"Segoe UI",system-ui,sans-serif;color:var(--ink);user-select:none;overflow:hidden}
+#root{display:flex;align-items:flex-start;gap:12px;padding:14px 16px 16px 14px;width:max-content}
+body.done{--c:var(--green)}
+body.need{--c:var(--need)}
+body.idle{--c:#5d636c}
+
+/* the face, and the ring that says what it's doing */
+#face{position:relative;width:62px;height:62px;flex:none;cursor:grab}
+#face .pic{position:absolute;inset:5px;width:52px;height:52px;border-radius:50%;z-index:2;box-shadow:0 0 0 2px #0b0c0e;transition:filter .6s;
+  background:var(--me) center/cover;display:flex;align-items:center;justify-content:center;font:800 22px "Segoe UI";color:#0b0c0e}
+body.idle #face .pic{filter:saturate(.55) brightness(.8)}
+#ring{position:absolute;inset:0;border-radius:50%;z-index:1;
+  background:conic-gradient(from 0deg,var(--c),transparent 30%,var(--c) 52%,transparent 80%,var(--c));
+  -webkit-mask:radial-gradient(circle,transparent 27px,#000 28px);mask:radial-gradient(circle,transparent 27px,#000 28px)}
+#halo{position:absolute;inset:-6px;border-radius:50%;z-index:0;background:radial-gradient(circle,var(--c) 0,transparent 68%);opacity:0;transition:opacity .6s}
+body.working #ring{animation:spin 2.6s linear infinite}
+body.working #halo{animation:breathe 2.6s ease-in-out infinite}
+body.need #ring{background:var(--c)}
+body.need #halo{animation:breathe 1.2s ease-in-out infinite}
+body.done #ring{background:var(--c)}
+body.done #halo{opacity:.28}
+body.idle #ring{background:#3a3f47}
+#face .badge{position:absolute;right:-1px;bottom:-1px;z-index:3;width:20px;height:20px;border-radius:50%;background:var(--green);color:#0b0c0e;
+  font:800 13px/20px "Segoe UI";text-align:center;box-shadow:0 0 0 3px #0b0c0e;transform:scale(0);transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+body.done #face .badge{transform:scale(1)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breathe{0%,100%{opacity:.18;transform:scale(.96)}50%{opacity:.5;transform:scale(1.06)}}
+.bloom #halo{animation:bloom 1.1s ease-out!important}
+@keyframes bloom{0%{opacity:.9;transform:scale(.9)}100%{opacity:.28;transform:scale(1.5)}}
+
+/* what it would be saying: a speech bubble that points at the face */
+#talk{position:relative;width:360px;margin-top:4px;padding:13px 16px 14px;border-radius:16px;cursor:grab;
+  background:linear-gradient(180deg,#191c22,#121418);
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--c) 38%,transparent),0 10px 30px rgba(0,0,0,.65),0 0 26px color-mix(in srgb,var(--c) 16%,transparent);
+  transition:box-shadow .6s}
+#talk::before{content:"";position:absolute;left:-7px;top:22px;width:14px;height:14px;background:#181b21;transform:rotate(45deg);
+  box-shadow:-1px 1px 0 0 color-mix(in srgb,var(--c) 38%,transparent)}
+body.collapsed #talk{display:none}
+#head{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--dim);margin-bottom:3px}
+#state{color:var(--c);font-weight:700;font-size:14px}
+#caller:empty{display:none}
+#head .caller{width:22px;height:22px;border-radius:50%;flex:none;background:var(--me) center/cover;box-shadow:0 0 0 2px #0b0c0e,0 0 0 3.5px var(--c);
+  display:flex;align-items:center;justify-content:center;font:800 11px "Segoe UI";color:#0b0c0e}
+#head .x{margin-left:auto;color:var(--faint);font-size:16px;line-height:1;padding:0 2px;cursor:pointer;opacity:0;transition:opacity .2s}
+#talk:hover .x{opacity:1}
+#head .x:hover{color:var(--ink)}
+
+#main{overflow-wrap:anywhere;position:relative;font-size:19px;font-weight:600;line-height:1.3;min-height:25px}
+#main span{display:block}
+#main span.out{position:absolute;left:0;right:0;top:0;animation:out .35s forwards}
+#main span.in{animation:in .4s ease-out}
+@keyframes out{to{opacity:0;transform:translateY(-10px)}}
+@keyframes in{from{opacity:0;transform:translateY(10px)}}
+#hands{font-size:13px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#hands:empty{display:none}
+
+#plan{margin-top:11px}
+#plan:empty{display:none}
+#plan .bars{display:flex;gap:4px}
+#plan .bars i{flex:1;height:4px;border-radius:2px;background:#2b3038;position:relative;overflow:hidden}
+#plan .bars i.did{background:color-mix(in srgb,var(--c) 70%,#000)}
+#plan .bars i.now{background:color-mix(in srgb,var(--c) 22%,#14171c)}
+#plan .bars i.now::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--c),transparent);animation:sweep 1.6s ease-in-out infinite}
+body.done #plan .bars i{background:var(--green)}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+#plan .what{font-size:13.5px;color:var(--dim);margin-top:6px}
+#plan .what b{color:var(--ink);font-weight:600}
+
+#reply{overflow-wrap:anywhere;font-size:15.5px;line-height:1.5;color:#e6e6e3;margin-top:4px;white-space:pre-wrap;
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#reply:empty{display:none}
+#reply b{color:var(--ink)}
+#reply code{font:13.5px Consolas,monospace;background:#23272f;padding:0 4px;border-radius:4px}
+body.all #reply{display:block;-webkit-line-clamp:unset;max-height:430px;overflow-y:auto;padding-right:6px;cursor:auto;user-select:text}
+#reply::-webkit-scrollbar{width:6px}#reply::-webkit-scrollbar-thumb{background:#333a44;border-radius:3px}
+#more{display:none;margin-top:6px;font-size:13px;color:var(--green);cursor:pointer}
+#more.show{display:inline-block}
+#more:hover{text-decoration:underline}
+
+#btns{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+#btns:empty{display:none}
+#btns b{font-weight:600;font-size:14px;padding:6px 13px;border-radius:999px;background:#23272f;border:1px solid #3a3f47;color:var(--ink);cursor:pointer}
+#btns b.first{background:var(--c);color:#0b0c0e;border-color:transparent}
+#words{display:none;font-size:13.5px;color:var(--dim);line-height:1.45;margin-top:8px;max-height:180px;overflow:auto;white-space:pre-wrap;user-select:text;cursor:auto}
+#words.show{display:block}
+
+#you{margin-top:10px;padding-top:9px;border-top:1px solid #262a31;font-size:13px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#you:empty{display:none}
+#you em{color:var(--yours);font-style:normal}
+</style>
+<div id="root">
+  <div id="face"><div id="halo"></div><div id="ring"></div><div class="pic"></div><div class="badge">✓</div></div>
+  <div id="talk">
+    <div id="head"><span id="caller"></span><span id="state">Here</span><span id="time"></span><span class="x" id="fold" title="Fold to just the face">–</span></div>
+    <div id="main"><span>Hi</span></div>
+    <div id="hands"></div>
+    <div id="reply"></div>
+    <span id="more">Read all</span>
+    <div id="plan"></div>
+    <div id="btns"></div>
+    <div id="words"></div>
+    <div id="you"></div>
+  </div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let P = null, kind = '', folded = false, auto = false, said = '', lastSize = '';
+const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// The AI's answer, readable: bold and code kept, links to their words, headings and fences dropped.
+const md = s => esc(s).replace(/```\w*\n?/g, '').replace(/^#+\s*/gm, '').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+  .replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/^\s*[-*] /gm, '• ').replace(/\n{3,}/g, '\n\n');
+const ago = ms => { const s = ms / 1000; return s < 45 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min' + (kind === 'done' ? ' ago' : '') : Math.round(s / 3600) + ' h' + (kind === 'done' ? ' ago' : ''); };
+const pic = (el, img, name) => { el.style.backgroundImage = img ? `url("${img}")` : ''; el.textContent = img ? '' : String(name || '?').trim().charAt(0).toUpperCase(); };
+
+// What to show, from the state and how old it is: work that went quiet for 15 minutes, or an answer 30 minutes old, rests.
+function kindOf(p) {
+  if (!p || !p.state || p.state === 'idle') return 'idle';
+  const age = Date.now() - new Date(p.at);
+  if (p.state === 'need') return age < 60 * 60e3 ? 'need' : 'idle';
+  if (p.state === 'working') return age < 15 * 60e3 ? 'working' : 'idle';
+  if (p.state === 'done') return age < 30 * 60e3 ? 'done' : 'idle';
+  return 'idle';
+}
+function sayMain(text) {
+  const m = $('#main'), cur = m.querySelector('span:not(.out)');
+  if (cur && cur.textContent === text) return;
+  m.querySelectorAll('.out').forEach(e => e.remove());
+  if (cur) { cur.className = 'out'; setTimeout(() => cur.remove(), 360); }
+  const n = document.createElement('span'); n.className = 'in'; n.textContent = text; m.append(n);
+}
+function render() {
+  const p = P || {}, c = p.cfg || {}, k = kindOf(P), was = kind; kind = k;
+  document.documentElement.style.setProperty('--me', c.color || '#f5a524');
+  document.documentElement.style.setProperty('--yours', c.yours || '#6cc6ff');
+  pic($('#face .pic'), c.face, c.name); $('#face').title = c.name || '';
+  const all = document.body.classList.contains('all') && k === 'done';
+  document.body.className = [k, all ? 'all' : ''].filter(Boolean).join(' ');
+  if (k === 'done' && was === 'working') { $('#root').classList.add('bloom'); setTimeout(() => $('#root').classList.remove('bloom'), 1200); }
+  // Nothing going on: it tucks down to the face. Something starts: it opens again (unless the person folded it).
+  if (k === 'idle' && was && was !== 'idle' && !folded) { folded = true; auto = true; }
+  if (k !== 'idle' && folded && auto) { folded = false; auto = false; }
+  if (!was && k === 'idle') { folded = true; auto = true; }
+  document.body.classList.toggle('collapsed', folded); host.folded(folded);
+  const call = p.call && k !== 'idle' ? p.call : null;
+  const caller = $('#caller'); caller.innerHTML = '';
+  if (call) { const d = document.createElement('span'); d.className = 'caller'; pic(d, call.face, call.from); caller.append(d); }
+  $('#state').textContent = k === 'need' ? 'Needs you' : call ? (k === 'done' ? `Call with ${call.from} done` : p.doing ? `On a call with ${call.from}` : `${call.from} is calling`)
+    : k === 'working' ? 'Working' : k === 'need' ? 'Needs you' : k === 'done' ? 'Done' : (c.name || 'Here');
+  $('#time').textContent = k === 'working' || k === 'need' ? '· ' + ago(Date.now() - new Date(p.since || p.at)) : k === 'done' ? '· ' + ago(Date.now() - new Date(p.at)) : '';
+  if (k === 'working') sayMain(p.say || p.doing || 'Working');
+  else if (k === 'need') sayMain(p.need || 'Needs you');
+  else if (k === 'done') sayMain(call ? (p.say || 'The call is done') : p.plan ? 'All done. Here’s where we landed' : 'Done. Here’s what I said');
+  else sayMain(p.state === 'done' ? 'Here when you need me' : (c.hello || 'Hi'));
+  $('#hands').textContent = k === 'working' && p.say && p.doing && p.doing !== p.say && p.doing !== 'Working' ? p.doing.charAt(0).toLowerCase() + p.doing.slice(1) : '';
+  const r = k === 'done' ? (p.said || '') : '';
+  if (r !== said) { said = r; $('#reply').innerHTML = md(r); document.body.classList.remove('all'); }
+  requestAnimationFrame(() => { const el = $('#reply'); $('#more').classList.toggle('show', k === 'done' && (el.scrollHeight > el.clientHeight + 2 || document.body.classList.contains('all'))); $('#more').textContent = document.body.classList.contains('all') ? 'Show less' : 'Read all'; size(); });
+  // The parts of the job, and which one it's on.
+  const plan = $('#plan');
+  if (p.plan?.length && (k === 'working' || k === 'need' || (k === 'done' && !call))) {
+    const at = Math.min(p.step || 1, p.plan.length + 1);
+    plan.innerHTML = '<div class="bars">' + p.plan.map((_, i) => `<i class="${i + 1 < at ? 'did' : i + 1 === at && k !== 'done' ? 'now' : ''}"></i>`).join('') + '</div>'
+      + `<div class="what">${k === 'done' || at > p.plan.length ? `All ${p.plan.length} parts done` : `Part ${at} of ${p.plan.length} · <b>${esc(p.plan[at - 1])}</b>`}</div>`;
+  } else plan.innerHTML = '';
+  const b = [];
+  if (k === 'need') b.push('<b class="first" data-k="thanks">I did it</b>');
+  if (k === 'done' && call && p.sid && c.chat) b.push('<b class="first" data-k="chat">Open this chat</b>');
+  if (call && call.words) b.push(`<b data-k="words">What ${esc(call.from)} asked</b>`);
+  $('#btns').innerHTML = b.join('');
+  $('#words').textContent = call ? (call.words || '') : ''; if (!call) $('#words').classList.remove('show');
+  $('#you').innerHTML = !call && p.asked && k !== 'idle' ? `You asked: <em>${esc(p.asked)}</em>` : '';
+  size();
+}
+function size() { const r = $('#root').getBoundingClientRect(), s = Math.ceil(r.width) + 'x' + Math.ceil(r.height); rects(); if (s === lastSize) return; lastSize = s; host.size(Math.ceil(r.width), Math.ceil(r.height)); }
+// The mouse belongs to the bubble only over the face and the speech bubble; main cuts the window to these shapes.
+let lastRects = '';
+function rects() { const r = [...document.querySelectorAll('#face,#talk')].map(e => e.getBoundingClientRect()).filter(b => b.width).map(b => [Math.floor(b.left), Math.floor(b.top), Math.ceil(b.right), Math.ceil(b.bottom)]); const s = JSON.stringify(r); if (s !== lastRects) { lastRects = s; host.rects(r); } }
+window.feed = p => { P = p; render(); };
+// The AI brings it to the person: it opens up (even if folded) and the ring blooms once as it lands.
+window.arrive = () => { folded = false; auto = false; render(); const r = $('#root'); r.classList.remove('bloom'); void r.offsetWidth; r.classList.add('bloom'); setTimeout(() => r.classList.remove('bloom'), 1200); };
+window.fold = on => { folded = on === null ? !folded : on; auto = false; render(); };
+setInterval(render, 20e3);
+
+// The person moves it by grabbing the face or the bubble (main follows the real cursor); a click on the face folds or opens it.
+let grab = null, moved = false;
+document.addEventListener('mousedown', e => {
+  if (e.button !== 0 || e.target.closest('#more,#fold,#btns,#words') || (document.body.classList.contains('all') && e.target.closest('#reply'))) return;
+  grab = { x: e.screenX, y: e.screenY }; moved = false;
+});
+document.addEventListener('mousemove', e => {
+  if (!grab) return;
+  if (!moved && Math.hypot(e.screenX - grab.x, e.screenY - grab.y) > 4) { moved = true; host.drag('start'); document.body.style.cursor = 'grabbing'; }
+});
+document.addEventListener('mouseup', e => {
+  if (!grab) return;
+  if (moved) host.drag('end'); else if (e.target.closest('#face')) { folded = !folded; auto = false; render(); }
+  grab = null; document.body.style.cursor = '';
+});
+window.addEventListener('blur', () => { if (grab) { if (moved) host.drag('end'); grab = null; document.body.style.cursor = ''; } });
+document.addEventListener('click', e => {
+  const k = e.target.closest('[data-k]')?.dataset.k;
+  if (k === 'words') { $('#words').classList.toggle('show'); size(); return; }
+  if (k) host.click(k);
+});
+$('#fold').onclick = () => { folded = true; auto = false; render(); };
+$('#more').onclick = () => { document.body.classList.toggle('all'); render(); };
+// The shape main cuts must match what's on screen; the bubble grows with CSS, so re-measure on every real change.
+new ResizeObserver(() => rects()).observe($('#talk'));
+new ResizeObserver(() => rects()).observe($('#face'));
+['transitionend', 'animationend'].forEach(t => document.addEventListener(t, () => rects()));
+setInterval(rects, 500);
+render();
+</script>

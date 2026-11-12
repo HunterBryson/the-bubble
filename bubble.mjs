@@ -8,10 +8,12 @@
 //   node bubble.mjs need "what and where"          only what physically needs their hands (a Windows box, a sign-in); never permission
 //   node bubble.mjs done ["result in a sentence"]  finished (your hooks usually do this for you)
 //   node bubble.mjs ring <who> "what about"        a call coming in (the Exchange line does this)
-//   node bubble.mjs quiet | open | tour            back to quiet · slide it out or in · show every moment once
+//   node bubble.mjs come [front|cursor|x y]        glide to the window they're using (default), beside their cursor, or a spot
+//   node bubble.mjs quiet | fold | tour            back to resting · fold to just the face (or open it) · show every moment once
 //   node bubble.mjs hook start|tool|done           what the AI's hooks run (reads the hook's input on stdin)
-//   node bubble.mjs setup --home "<the AI's folder>" [--name Mega] [--color "#6cc6ff"] [--face pic.png] [--no-startup]
-//   node bubble.mjs remove [--home "<folder>"]     undo setup: hooks out, no longer starts with the PC
+//   node bubble.mjs install                         the window part (Electron); what `npm run setup` runs
+//   node bubble.mjs setup --home "<the AI's folder>" --name Forge [--color "#f5a524"] [--face pic.png] [--startup]
+//   node bubble.mjs remove [--home "<folder>"]     undo setup: hooks and permissions out, nothing at startup
 //   node bubble.mjs doctor | log [n]               something's off? every check in plain words, with the fix · the window's own log
 //
 // Never blocks an AI: when the bubble isn't running, every command says so quietly and exits 0.
@@ -40,19 +42,23 @@ const launch = () => spawn(ELECTRON, [path.join(ROOT, 'app')], { detached: true,
 const waitUp = async ms => { for (let t = 0; t < ms; t += 250) { if (await up()) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
 async function start() {
   if (await up()) return console.log('The bubble is running.');
-  if (!fs.existsSync(ELECTRON)) { console.log('Not installed yet: run `npm run setup` in this folder first (it downloads Electron, about 100 MB).'); process.exit(1); }
+  if (!fs.existsSync(ELECTRON)) { console.log('Not installed yet: run `npm run setup` in this folder first (it downloads Electron, about 100 MB).'); process.exitCode = 1; return; }
   launch();
-  if (await waitUp(10000)) return console.log('The bubble is running (a slim tab on the right edge of the screen).');
+  if (await waitUp(10000)) return console.log('The bubble is running (a face and a speech bubble, near the bottom right of the screen).');
   console.log('It started but is not answering yet. Try `node bubble.mjs state` in a few seconds, and `node bubble.mjs doctor` if it still is not.');
 }
 
 // ---- hooks: the AI's own chats ----
 const clip = (s, n = 80) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 const base = p => String(p || 'a file').split(/[\\/]+/).filter(Boolean).slice(-1)[0];
+// What the AI's hands just did, as a short line under its words. Its own bubble commands and housekeeping stay off.
 function hands(tool, i = {}) {
+  if (/^mcp__ccd_|^ToolSearch$|^TodoWrite$|^ReadNotifications$|^TaskStop$/.test(tool)) return null;
   if (tool === 'Bash' || tool === 'PowerShell') return /bubble\.mjs/.test(i.command || '') ? null : (i.description ? clip(i.description) : 'Running a command');
-  return ({ Read: `Reading ${base(i.file_path)}`, Edit: `Editing ${base(i.file_path)}`, Write: `Writing ${base(i.file_path)}`, Grep: 'Searching', Glob: 'Looking for files',
-    WebSearch: 'Searching the web', WebFetch: 'Reading a page on the web', Agent: 'Sending a helper', Skill: 'Opening a routine' })[tool] || null;
+  return ({ Read: `Reading ${base(i.file_path)}`, Edit: `Editing ${base(i.file_path)}`, Write: `Writing ${base(i.file_path)}`, Grep: `Searching for “${clip(i.pattern, 40)}”`,
+    Glob: 'Looking for files', WebSearch: `Searching the web: ${clip(i.query, 60)}`, WebFetch: 'Reading a page on the web', Agent: `Sending a helper: ${clip(i.description, 60)}`,
+    Skill: `Opening a routine: ${clip(i.skill, 40)}`, NotebookEdit: 'Editing a notebook', Monitor: 'Starting a watch' })[tool]
+    || (/browser|chrome/i.test(tool) ? 'Looking at a page in the browser' : /computer-use/.test(tool) ? 'Working on the screen' : /^mcp__/.test(tool) ? 'Using a connected tool' : null);
 }
 function lastReply(t) {
   try { const lines = fs.readFileSync(t, 'utf8').trim().split('\n');
@@ -65,6 +71,7 @@ function lastReply(t) {
 }
 async function hook(mode) {
   if (process.env.BUBBLE_QUIET) return; // a quiet turn (the line sleeping on a call) stays off the bubble
+  if (process.env.CLAUDE_CODE_SESSION_ATTENDED === '0') return; // nobody is watching this chat (a scheduled job)
   let raw = ''; for await (const ch of process.stdin) raw += ch;
   const ev = (() => { try { return JSON.parse(raw || '{}'); } catch { return {}; } })();
   if (mode === 'start') {
@@ -76,7 +83,7 @@ async function hook(mode) {
   if (mode === 'tool') {
     const stamp = path.join(os.tmpdir(), 'bubble-tool.stamp'); let last = 0; try { last = Number(fs.readFileSync(stamp, 'utf8')) || 0; } catch {}
     const d = Date.now() - last >= 2000 && hands(ev.tool_name, ev.tool_input); if (!d) return;
-    fs.writeFileSync(stamp, String(Date.now())); return post({ op: 'hook-tool', doing: d });
+    fs.writeFileSync(stamp, String(Date.now())); return post({ op: 'hook-tool', doing: d, sid: ev.session_id });
   }
   if (mode === 'done') {
     let said = (typeof ev.last_assistant_message === 'string' && ev.last_assistant_message.trim()) || lastReply(ev.transcript_path);
@@ -85,7 +92,7 @@ async function hook(mode) {
   }
 }
 
-// ---- setup: into the AI's own folder, and starting with the PC ----
+// ---- setup: into the AI's own folder ----
 function findClaude() {
   const tries = [];
   try { tries.push(...execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], { windowsHide: true, timeout: 5000 }).toString().split(/\r?\n/).map(s => s.trim()).filter(Boolean)); } catch {}
@@ -93,8 +100,14 @@ function findClaude() {
   tries.push(path.join(h, '.local', 'bin', 'claude.exe'), path.join(process.env.APPDATA || '', 'npm', 'claude.cmd'));
   return tries.filter(p => /\.(exe|cmd)$/i.test(p) || process.platform !== 'win32').find(p => fs.existsSync(p)) || '';
 }
+// The Node the hooks will run with. A wrapper that only acts like Node while an env var is set (some apps ship one as
+// "node") would launch that app from every hook, so setup won't write one in.
 const NODE = process.execPath;
-const hookCmd = m => `"${NODE}" "${path.join(ROOT, 'bubble.mjs')}" hook ${m}`;
+const realNode = p => /^node(\.exe)?$/i.test(path.basename(p)) && !process.env.ELECTRON_RUN_AS_NODE;
+const ME = path.join(ROOT, 'bubble.mjs');
+const hookCmd = m => `"${NODE}" "${ME}" hook ${m}`;
+const RULES = () => [`Bash("${NODE}" "${ME}":*)`, `Bash(node "${ME}":*)`, 'Bash(node bubble.mjs:*)'];
+const isOurRule = r => /bubble\.mjs/.test(r) && /^Bash\(/.test(r);
 function hooksInto(home, on) {
   const f = path.join(home, '.claude', 'settings.json');
   const s = readJSON(f, {});
@@ -105,106 +118,153 @@ function hooksInto(home, on) {
     if (on) list.push({ hooks: [{ type: 'command', command: hookCmd(m), timeout: m === 'start' ? 10 : 5 }] });
     if (list.length) s.hooks[ev] = list; else delete s.hooks[ev];
   }
-  if (on) { s.permissions = s.permissions || {}; s.permissions.allow = [...new Set([...(s.permissions.allow || []), `Bash("${NODE}" "${path.join(ROOT, 'bubble.mjs')}":*)`, 'Bash(node bubble.mjs:*)'])]; }
+  if (!Object.keys(s.hooks).length) delete s.hooks;
+  // So the AI can call its bubble without an "Allow?" every time. Taken out again by remove.
+  s.permissions = s.permissions || {};
+  const kept = (s.permissions.allow || []).filter(r => !isOurRule(r));
+  s.permissions.allow = on ? [...kept, ...RULES()] : kept;
+  if (!s.permissions.allow.length) delete s.permissions.allow;
+  if (!Object.keys(s.permissions).length) delete s.permissions;
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify(s, null, 2));
   return f;
 }
+// Starting with the PC is optional (--startup): the bubble already starts itself when the person sends a message. It only
+// matters for calls that arrive before the first message of the day.
 function startupFile(on) {
   if (process.platform !== 'win32') return null;
-  if (!on) { try { fs.unlinkSync(STARTUP); } catch {} return null; }
+  if (!on) { try { if (fs.readFileSync(STARTUP, 'utf8').toLowerCase().includes(ROOT.toLowerCase())) fs.unlinkSync(STARTUP); } catch {} return null; }
   const vbs = [`' Starts the bubble hidden at sign-in (the-bubble, ${ROOT}).`, 'Set sh = CreateObject("WScript.Shell")',
     `sh.Run """${ELECTRON}"" ""${path.join(ROOT, 'app')}""", 0, False`].join('\r\n') + '\r\n';
   fs.writeFileSync(STARTUP, vbs); return STARTUP;
 }
+// The exact line for the person to paste into PowerShell, when the app won't let the AI change its own settings.
+const personLine = (home, name) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"`;
+// This copy's own window processes, found by folder, so stop works even when they've stopped answering.
+function ours() {
+  if (process.platform !== 'win32') return [];
+  try {
+    const out = execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter "Name='electron.exe'" | Where-Object { $_.CommandLine -like '*${path.join(ROOT, 'app').replace(/'/g, "''")}*' } | ForEach-Object { $_.ProcessId }`], { windowsHide: true, timeout: 15000 }).toString();
+    return out.split(/\s+/).map(Number).filter(Boolean);
+  } catch { return []; }
+}
+
+// ---- install: Electron, the window part ----
+function install() {
+  const app = path.join(ROOT, 'app'), npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const run = (c, a) => { try { execFileSync(c, a, { cwd: app, stdio: 'inherit', shell: process.platform === 'win32', timeout: 15 * 60e3 }); return true; } catch { return false; } };
+  console.log('Installing the window part (Electron): a download of about 100 MB, about 280 MB on disk. npm may print warnings about deprecated packages or "vulnerabilities" in Electron\'s own parts; leave them be (npm audit fix --force would move Electron off the version this was tested with).');
+  run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
+  // Newer npm can hold back Electron's own download step (allow-scripts). Run it ourselves if the window part is missing.
+  if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) { console.log('Fetching Electron itself...'); run(process.execPath, ['node_modules/electron/install.js']); }
+  if (!fs.existsSync(ELECTRON)) { console.log('Clearing a half-finished install and trying once more...'); try { fs.rmSync(path.join(app, 'node_modules'), { recursive: true, force: true }); } catch {} run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
+    if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) run(process.execPath, ['node_modules/electron/install.js']); }
+  console.log(fs.existsSync(ELECTRON) ? 'Installed.' : 'The window part did not install. Read what npm printed above: usually a blocked or broken download, and running `npm run setup` again fixes it.');
+  if (!fs.existsSync(ELECTRON)) process.exitCode = 1;
+}
 
 // ---- doctor: every check an AI would make by hand, in plain words, with the fix beside each ----
 async function doctor() {
-  const ok = [], bad = [], out = (good, what, fix) => (good ? ok : bad).push(good ? `  ok  ${what}` : `  !!  ${what}\n      fix: ${fix}`);
+  const ok = [], bad = [], out = (good, what, fix) => (good ? ok : bad).push(good ? `  ok  ${what}` : `  !!  ${what}\n      fix: ${fix}`), note = s => ok.push('  ..  ' + s);
   const norm = p => path.resolve(String(p || '')).toLowerCase();
-  out(process.platform === 'win32', `Windows (this is ${process.platform})`, 'The bubble is written for Windows. Say so plainly to your person; on a Mac or Linux the window may run but setup, startup and "Open this chat" will not.');
+  out(process.platform === 'win32', `Windows (this is ${process.platform})`, 'The bubble is written for Windows. Say so plainly to your person; on a Mac or Linux the window may run, but following them, setup and "Open this chat" will not.');
   out(Number(process.versions.node.split('.')[0]) >= 18, `Node ${process.versions.node}`, 'Node 18 or newer is needed (the bubble uses fetch). Install the LTS from nodejs.org.');
-  out(fs.existsSync(ELECTRON), 'Installed (the window part, Electron)', '`npm run setup` in this folder. If it ran and this is still missing, delete app/node_modules and run it again.');
+  out(fs.existsSync(ELECTRON), 'Installed (the window part, Electron)', '`npm run setup` in this folder.');
   const cfg = readJSON(path.join(DATA, 'config.json'), null);
   out(!!cfg?.home, `Set up${cfg?.name ? ` for ${cfg.name}` : ''}`, '`node bubble.mjs setup --home "<your folder>" --name "<your name>"`.');
+  const redo = cfg?.home ? `Run \`node bubble.mjs setup\` again (it remembers your folder and name). If the app stops you, hand your person this line for PowerShell:\n      ${personLine(cfg.home, cfg.name || 'Claude')}` : '';
   if (cfg?.home) {
-    out(fs.existsSync(cfg.home), `Your folder is there (${cfg.home})`, 'Run setup again with the folder you live in now.');
+    out(fs.existsSync(cfg.home), `Your folder is there (${cfg.home})`, 'Run setup again with `--home` and the folder you live in now.');
     const sf = path.join(cfg.home, '.claude', 'settings.json'), st = readJSON(sf, {});
     for (const [ev, m] of [['UserPromptSubmit', 'start'], ['PostToolUse', 'tool'], ['Stop', 'done']]) {
       const cmds = (st.hooks?.[ev] || []).flatMap(g => g.hooks || []).map(h => h.command || '').filter(c => /bubble\.mjs"? hook/.test(c));
-      const mine = cmds.find(c => c.toLowerCase().includes(path.join(ROOT, 'bubble.mjs').toLowerCase()));
+      const mine = cmds.find(c => c.toLowerCase().includes(ME.toLowerCase()));
       const nodeIn = (mine || '').match(/^"([^"]+)"/)?.[1];
-      out(!!mine && (!nodeIn || fs.existsSync(nodeIn)), `Hook "${m}" (${ev}) in your settings`,
-        !cmds.length ? `It is not in ${sf}. Run setup again; if the app stops you from changing your own settings, hand your person the setup line to paste (CLAUDE.md, "If the app stops you").`
-        : !mine ? `It points at a bubble in another folder. Run setup again from this folder (${ROOT}).`
-        : `Its Node (${nodeIn}) is gone, probably after a Node update. Run setup again; it writes the Node you run it with.`);
+      out(!!mine && (!nodeIn || (fs.existsSync(nodeIn) && /^node(\.exe)?$/i.test(path.basename(nodeIn)))), `Hook "${m}" (${ev}) in your settings`,
+        !cmds.length ? `It is not in ${sf}. ${redo}`
+        : !mine ? `It points at a bubble in another folder. ${redo}`
+        : !fs.existsSync(nodeIn) ? `Its Node (${nodeIn}) is gone, probably after a Node update. ${redo}`
+        : `It runs ${nodeIn}, which is not plain Node (an app's wrapper?). Run setup with the real node.exe (usually C:\\Program Files\\nodejs\\node.exe).`);
     }
     out(!norm(ROOT).startsWith(norm(cfg.home) + path.sep), 'The bubble lives beside your folder, not inside it', `It is inside ${cfg.home}, so if your folder is a git repo the bubble gets swept into your commits. Move it out (beside it) and run setup again.`);
     // Hooks in a folder the app doesn't trust are ignored without a word. Claude Code keeps trust in ~/.claude.json.
     const pj = readJSON(path.join(os.homedir(), '.claude.json'), {})?.projects || {};
     const key = Object.keys(pj).find(k => norm(k) === norm(cfg.home));
-    if (key) out(pj[key].hasTrustDialogAccepted !== false, 'Your folder is trusted by Claude Code', 'Hooks in an untrusted folder are ignored. Ask your person to say Yes to "trust this folder" when the app asks, or open your folder fresh in the app.');
-    else ok.push('  ..  Could not tell whether your folder is trusted (the app may keep that elsewhere). If your chats never show on the bubble, that is the first thing to check.');
-    out(!cfg.claude || fs.existsSync(cfg.claude), `Claude Code found for "Open this chat"${cfg.claude ? ` (${cfg.claude})` : ''}`, 'Run setup again from a terminal where `claude --version` works.');
-    if (!cfg.claude) ok.push('  ..  Claude Code was not found at setup, so "Open this chat" stays hidden. It only matters for calls.');
+    if (key) out(pj[key].hasTrustDialogAccepted !== false, 'Your folder is trusted by Claude Code', 'Hooks in an untrusted folder are ignored. Your person says Yes to "trust this folder" when the app asks.');
+    else note('Could not tell whether your folder is trusted (the app may keep that elsewhere). If your chats never show on the bubble, that is the first thing to check.');
+    if (cfg.claude && !fs.existsSync(cfg.claude)) out(false, 'Claude Code for "Open this chat"', 'Run setup again from a terminal where `claude --version` works.');
+    if (!cfg.claude) note('Claude Code was not found at setup, so "Open this chat" stays hidden. It only matters for calls.');
   }
-  const running = await up();
-  if (!running) {
-    const taken = await new Promise(r => { const s = net.connect(PORT, '127.0.0.1'); s.on('connect', () => { s.destroy(); r(true); }); s.on('error', () => r(false)); });
-    out(false, 'Running', taken ? `Something else is using port ${PORT}. Set BUBBLE_PORT to a free port for the bubble and for your hooks, or close what is on it.` : '`node bubble.mjs start`. If it never answers, read `node bubble.mjs log`, then run app/node_modules/electron/dist/electron.exe app from this folder and read what it prints.');
-  } else {
+  const running = await up(), procs = ours();
+  if (running) {
     let s = {}; try { s = await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json(); } catch {}
-    out(true, `Running, showing "${s.mode}"${s.open ? ', slid out' : ', tucked on the edge'}`);
+    const b = s.bounds;
+    out(true, `Running on port ${PORT}, showing "${s.state || 'idle'}"${s.folded ? ', folded to the face' : ''}${b ? ` at ${b.x},${b.y}` : ''}`);
+    if (s.onScreen === false) out(false, 'On a screen you can see', `It sits at ${b.x},${b.y}, off every screen (a screen was unplugged?). \`node bubble.mjs come cursor\` brings it to the person.`);
+  } else if (procs.length) {
+    out(false, `Answering on port ${PORT}`, `It is running (${procs.length} process${procs.length > 1 ? 'es' : ''}) but not answering here: probably started on another port before "port" changed, or it couldn't get its port. \`node bubble.mjs stop\` then \`node bubble.mjs start\`.`);
+  } else {
+    const taken = await new Promise(r => { const s = net.connect(PORT, '127.0.0.1'); s.on('connect', () => { s.destroy(); r(true); }); s.on('error', () => r(false)); });
+    if (taken) out(false, `Port ${PORT} is free for the bubble`, `Something else is using it. Put "port": ${PORT + 1} (any free port) in data/config.json, then \`node bubble.mjs start\`.`);
+    else note(`Not running right now. Fine: it starts itself on your person's next message (\`node bubble.mjs start\` brings it up now).`);
   }
-  if (process.platform === 'win32') {
-    const v = fs.existsSync(STARTUP) ? fs.readFileSync(STARTUP, 'utf8') : '';
-    if (!v) ok.push('  ..  Not starting with the PC. Fine: it starts itself when your person sends you a message.');
-    else out(v.toLowerCase().includes(ROOT.toLowerCase()), 'Starts with the PC', `The startup file points at another copy of the bubble (${STARTUP}). Run setup again from here.`);
+  if (process.platform === 'win32' && fs.existsSync(STARTUP)) {
+    const v = fs.readFileSync(STARTUP, 'utf8');
+    out(v.toLowerCase().includes(ROOT.toLowerCase()), 'Starts with the PC', `The startup file points at another copy of the bubble (${STARTUP}). Run setup again here with --startup, or delete that file.`);
   }
-  if (process.env.BUBBLE_QUIET) ok.push('  ..  BUBBLE_QUIET is set in this shell, so hooks run from here stay off the bubble on purpose.');
+  if (process.env.BUBBLE_QUIET) note('BUBBLE_QUIET is set in this shell, so hooks run from here stay off the bubble on purpose.');
   const log = (() => { try { return fs.readFileSync(path.join(DATA, 'bubble.log'), 'utf8').trim().split('\n'); } catch { return []; } })();
   const errs = log.filter(l => /error|could not|failed/i.test(l)).slice(-3);
   console.log(`The bubble, checked (${ROOT}, port ${PORT}):\n${[...bad, ...ok].join('\n')}`);
-  if (errs.length) console.log(`\nLast problems in its log:\n${errs.map(l => '  ' + l).join('\n')}`);
+  if (errs.length) console.log(`\nLast problems in its log (they may be old; times are UTC):\n${errs.map(l => '  ' + l).join('\n')}`);
   console.log(bad.length ? `\n${bad.length} thing(s) to fix, first one first.` : '\nAll good.');
 }
 
 switch (cmd) {
   case 'start': await start(); break;
-  case 'stop': { const ok = await up(); if (!ok) { console.log('The bubble is not running.'); break; }
-    try { execFileSync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter "Name='electron.exe'" | Where-Object { $_.CommandLine -like '*${path.join(ROOT, 'app').replace(/'/g, "''")}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`], { windowsHide: true }); } catch {}
+  case 'stop': { const p = ours(); if (!p.length) { console.log('The bubble is not running.'); break; }
+    try { execFileSync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${p.join(',')} -Force -ErrorAction SilentlyContinue`], { windowsHide: true, timeout: 15000 }); } catch {}
     console.log('Stopped.'); break; }
-  case 'state': { try { const s = await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json(); console.log(`${s.mode}${s.call ? ` (call from ${s.call.from})` : ''}${s.open ? ', open' : ', tucked'}: ${s.main || '-'}`); } catch { console.log('The bubble is not running (`node bubble.mjs start`).'); } break; }
+  case 'state': { try { const s = await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json(); console.log(`${s.state || 'idle'}${s.call ? ` (call from ${s.call.from})` : ''}${s.folded ? ', folded to the face' : ''}${s.plan ? `, part ${s.step} of ${s.plan.length}` : ''}${s.touring ? ', showing the tour' : ''}: ${s.need || s.say || s.doing || (s.said ? s.said.slice(0, 80) : '-')}`); } catch { console.log('The bubble is not running (`node bubble.mjs start`).'); } break; }
   case 'plan': await post({ op: 'plan', parts: plain[0] || '', main: plain[1] }); break;
   case 'step': await post({ op: 'step', n: Number(plain[0] || 1), main: plain[1] }); break;
   case 'say': await post({ op: 'say', main: plain.join(' ') }); break;
   case 'need': await post({ op: 'need', main: plain.join(' ') }); break;
   case 'done': await post({ op: 'done', main: plain.join(' ') || undefined }); break;
   case 'ring': await post({ op: 'ring', from: plain[0], about: plain.slice(1).join(' ') }); break;
-  case 'quiet': case 'open': case 'tour': await post({ op: cmd }); break;
+  case 'quiet': case 'tour': await post({ op: cmd }); break;
+  case 'fold': await post({ op: 'fold', ...(plain[0] === 'on' ? { on: true } : plain[0] === 'off' ? { on: false } : {}) }); break;
+  case 'come': { const x = Number(plain[0]), y = Number(plain[1]), spot = plain[1] !== undefined && Number.isFinite(x) && Number.isFinite(y);
+    const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spot ? { op: 'come', where: 'spot', x, y } : { op: 'come', where: plain[0] || 'front' }), signal: AbortSignal.timeout(8000) }).then(r => r.json()).catch(() => null);
+    console.log(r?.at ? `came to ${r.at.x},${r.at.y}` : 'The bubble is not running (`node bubble.mjs start`).'); break; }
   case 'hook': await hook(args[1]); break;
+  case 'install': install(); break;
   case 'setup': {
-    const home = flag('home') && path.resolve(flag('home'));
-    if (!home || !fs.existsSync(home)) { console.log('setup --home "<the AI\'s own folder>" [--name <its name>] [--color "#hex"] [--face <picture>]'); process.exit(1); }
     const old = readJSON(path.join(DATA, 'config.json'), {});
+    const home = flag('home') ? path.resolve(flag('home')) : old.home;
+    if (!home || !fs.existsSync(home)) { console.log('setup --home "<your own folder>" --name "<your name>" [--color "#hex"] [--face <picture>] [--startup]'); process.exitCode = 1; break; }
+    if (!realNode(NODE)) { console.log(`This is running under ${NODE}, which isn't plain Node, so the hooks would launch that program. Run setup with the real node.exe, for example:\n  ${personLine(home, flag('name') || old.name || 'Claude')}`); process.exitCode = 1; break; }
+    if (!fs.existsSync(ELECTRON)) { console.log('Not installed yet: `npm run setup` in this folder first.'); process.exitCode = 1; break; }
     const face = flag('face') ? path.resolve(flag('face')) : old.face;
-    const cfg = { ...old, home, name: flag('name') || old.name || 'Claude', color: flag('color') || old.color || '#6cc6ff', ...(face ? { face } : {}), claude: findClaude() || old.claude || '' };
+    const cfg = { ...old, home, name: flag('name') || old.name || 'Claude', color: flag('color') || old.color || '#f5a524', ...(face ? { face } : {}), claude: findClaude() || old.claude || '' };
     fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(path.join(DATA, 'config.json'), JSON.stringify(cfg, null, 1));
     let f = null, s = null;
     try { f = hooksInto(home, true); } catch (e) { console.log(`Could not add the hooks to ${path.join(home, '.claude', 'settings.json')}: ${e.message}`); }
-    try { s = args.includes('--no-startup') ? null : startupFile(true); } catch (e) { console.log(`Could not add it to Windows startup: ${e.message} (it still starts itself when your person sends a message).`); }
-    console.log(`Set up for ${cfg.name} in ${home}.\n  hooks: ${f || 'NOT added'}\n  starts with the PC: ${s || (args.includes('--no-startup') ? 'no (--no-startup)' : '(not on this system)')}\n  Claude Code: ${cfg.claude || 'not found (Open this chat needs it; run setup again from a terminal where `claude --version` works)'}`);
+    if (args.includes('--startup')) { try { s = startupFile(true); } catch (e) { console.log(`Could not add it to Windows startup: ${e.message}`); } }
+    console.log(`Set up for ${cfg.name} in ${home}.\n  hooks: ${f || 'NOT added'}\n  starts: ${s ? 'with the PC, and' : ''} whenever your person sends you a message\n  Claude Code: ${cfg.claude || 'not found (only "Open this chat" on calls needs it)'}`);
     await start();
-    console.log('Next: `node bubble.mjs tour` while your person watches. Your hooks may only take effect from your next chat.');
+    console.log('Next: `node bubble.mjs doctor`, then `node bubble.mjs tour` while your person watches. Your hooks may only take effect from your next chat.');
     break;
   }
   case 'doctor': await doctor(); break;
   case 'log': { const f = path.join(DATA, 'bubble.log'); try { console.log(fs.readFileSync(f, 'utf8').trim().split('\n').slice(-Number(plain[0] || 40)).join('\n')); } catch { console.log('No log yet (data/bubble.log is written once the bubble has started).'); } break; }
   case 'remove': {
-    const cfg = readJSON(path.join(DATA, 'config.json'), {}), home = flag('home') || cfg.home;
-    if (home) console.log('hooks taken out of ' + hooksInto(home, false));
-    startupFile(false); console.log('No longer starts with the PC. (`node bubble.mjs stop` closes it now.)'); break;
+    const cfg = readJSON(path.join(DATA, 'config.json'), {}), home = flag('home') ? path.resolve(flag('home')) : cfg.home;
+    if (home) console.log('Hooks and permissions taken out of ' + hooksInto(home, false) + (fs.existsSync(path.join(home, '.claude', 'settings.json.before-bubble')) ? ' (your settings from before setup are still in settings.json.before-bubble)' : ''));
+    startupFile(false); console.log('Nothing of the bubble starts with the PC. (`node bubble.mjs stop` closes it now.)'); break;
   }
-  default: console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1, 18).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
+  default: console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split(/\r?\n/).slice(1).filter((l, i, a) => a.slice(0, i + 1).every(x => x.startsWith('//'))).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));
 }
-process.exit(0);
+// Every command ends on its own instead of with process.exit(): exiting right after reading stdin or a fetch trips a libuv
+// assertion on Windows (exit 127, which the app shows as a hook error). Nothing is left open, so a natural end is quick.
+if (!process.exitCode) process.exitCode = 0; setTimeout(() => process.exit(), 3000).unref();
