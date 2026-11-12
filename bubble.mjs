@@ -7,7 +7,7 @@
 //   node bubble.mjs say "sentence"                 something worth telling them mid-job
 //   node bubble.mjs need "what and where"          only what physically needs their hands (a Windows box, a sign-in); never permission
 //   node bubble.mjs done ["result in a sentence"]  finished (your hooks usually do this for you)
-//   node bubble.mjs ring <who> "what about"        a call coming in (the Exchange line does this)
+//   node bubble.mjs ring <who> "what about"        a call from another AI, if you build a way to reach each other
 //   node bubble.mjs come [front|cursor|x y]        glide to the window they're using (default), beside their cursor, or a spot
 //   node bubble.mjs quiet | fold | tour            back to resting · fold to just the face (or open it) · show every moment once
 //   node bubble.mjs hook start|tool|done           what the AI's hooks run (reads the hook's input on stdin)
