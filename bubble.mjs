@@ -13,6 +13,7 @@
 //   node bubble.mjs hook start|tool|done           what the AI's hooks run (reads the hook's input on stdin)
 //   node bubble.mjs install                         the window part (Electron); what `npm run setup` runs
 //   node bubble.mjs setup --home "<the AI's folder>" --name Forge [--color "#f5a524"] [--face pic.png] [--startup]
+//   node bubble.mjs line --home "<folder>" --name Forge [--startup]   the one line your person pastes, if the app won't let you run setup
 //   node bubble.mjs remove [--home "<folder>"]     undo setup: hooks and permissions out, nothing at startup
 //   node bubble.mjs doctor | log [n]               something's off? every check in plain words, with the fix · the window's own log
 //
@@ -141,7 +142,9 @@ function startupFile(on) {
   fs.writeFileSync(STARTUP, vbs); return STARTUP;
 }
 // The exact line for the person to paste into PowerShell, when the app won't let the AI change its own settings.
-const personLine = (home, name, color, face) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"${color ? ` --color "${color}"` : ''}${face ? ` --face "${face}"` : ''}`;
+const personLine = (home, name, color, face, startup) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"${color ? ` --color "${color}"` : ''}${face ? ` --face "${face}"` : ''}${startup ? ' --startup' : ''}`;
+// Forge tested Electron 33.2.0 under Node 26 (Nov 12): the unzip needed Windows' tar, which install now does by itself.
+const TESTED_NODE = [18, 20, 22, 24, 26];
 // When the port doesn't answer: is a copy of ours running anyway (an old port), or is it really down?
 const downWhy = () => ours().length ? `The bubble is running but not answering on port ${PORT} (it may have started on another port). \`node bubble.mjs doctor\` says what to do.` : 'The bubble is not running (`node bubble.mjs start`).';
 // This copy's own window processes, found by folder, so stop works even when they've stopped answering.
@@ -154,7 +157,7 @@ function ours() {
 }
 
 // ---- install: Electron, the window part ----
-function install() {
+async function install() {
   const app = path.join(ROOT, 'app'), npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
   // npm.cmd needs a shell on Windows, so it gets one command line; Node itself runs directly (no shell, so a path with spaces works).
   const run = (c, a) => { try { if (c === npm) execSync([npm, ...a].join(' '), { cwd: app, stdio: 'inherit', timeout: 15 * 60e3 }); else execFileSync(c, a, { cwd: app, stdio: 'inherit', timeout: 15 * 60e3 }); return true; } catch { return false; } };
@@ -162,10 +165,40 @@ function install() {
   run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
   // Newer npm can hold back Electron's own download step (allow-scripts). Run it ourselves if the window part is missing.
   if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) { console.log('Fetching Electron itself...'); run(process.execPath, ['node_modules/electron/install.js']); }
+  // Electron's own unzip (extract-zip/yauzl) can stop after one file and still exit 0, with no error: Forge found this on
+  // his dad's PC under Node 26 (Nov 12), on every install. Running npm again only repeats it. So when the window part is
+  // still missing, unpack the zip ourselves with Windows' own tar.exe, which is on every Windows 10 and 11.
+  if (!fs.existsSync(ELECTRON) && process.platform === 'win32' && fs.existsSync(path.join(app, 'node_modules', 'electron', 'package.json'))) await unpackElectron(app);
   if (!fs.existsSync(ELECTRON)) { console.log('Clearing a half-finished install and trying once more...'); try { fs.rmSync(path.join(app, 'node_modules'), { recursive: true, force: true }); } catch {} run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
-    if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) run(process.execPath, ['node_modules/electron/install.js']); }
-  console.log(fs.existsSync(ELECTRON) ? 'Installed.' : 'The window part did not install. Read what npm printed above: usually a blocked or broken download, and running `npm run setup` again fixes it.');
+    if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) run(process.execPath, ['node_modules/electron/install.js']);
+    if (!fs.existsSync(ELECTRON) && process.platform === 'win32' && fs.existsSync(path.join(app, 'node_modules', 'electron', 'package.json'))) await unpackElectron(app); }
+  console.log(fs.existsSync(ELECTRON) ? 'Installed.' : `The window part did not install (Node ${process.versions.node}). If npm printed a network error above, the download was blocked: run \`npm run setup\` again. If it printed nothing wrong, run \`node bubble.mjs doctor\` and read data/bubble.log; the folder app\\node_modules\\electron\\dist should end up holding electron.exe.`);
   if (!fs.existsSync(ELECTRON)) process.exitCode = 1;
+}
+// Find Electron's zip (the copy npm already downloaded, or a fresh one from GitHub), unpack it with Windows' tar.exe,
+// write path.txt the way Electron's installer would, and check electron.exe is really there.
+async function unpackElectron(app) {
+  const dir = path.join(app, 'node_modules', 'electron'), ver = readJSON(path.join(dir, 'package.json'), {}).version;
+  const arch = process.arch === 'arm64' ? 'arm64' : process.arch === 'ia32' ? 'ia32' : 'x64', name = `electron-v${ver}-win32-${arch}.zip`;
+  const tar = path.join(process.env.WINDIR || 'C:\\Windows', 'System32', 'tar.exe');
+  if (!ver || !fs.existsSync(tar)) return false;
+  console.log(`Electron's own unzip stopped early (this happens on newer Node; this is Node ${process.versions.node}). Unpacking it with Windows' tar instead...`);
+  const find = (d, depth = 0) => { try { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name);
+    if (e.isFile() && e.name === name && fs.statSync(p).size > 50e6) return p; if (e.isDirectory() && depth < 3) { const f = find(p, depth + 1); if (f) return f; } } } catch {} return null; };
+  let zip = find(process.env.ELECTRON_CACHE || path.join(process.env.LOCALAPPDATA || '', 'electron', 'Cache'));
+  if (!zip) {
+    console.log(`No downloaded copy found, so fetching ${name} from GitHub (about 100 MB)...`);
+    try { const r = await fetch(`https://github.com/electron/electron/releases/download/v${ver}/${name}`, { signal: AbortSignal.timeout(15 * 60e3) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`); zip = path.join(os.tmpdir(), name); fs.writeFileSync(zip, Buffer.from(await r.arrayBuffer())); }
+    catch (e) { console.log(`Could not download it: ${e.message}.`); return false; }
+  }
+  const dist = path.join(dir, 'dist');
+  try { fs.rmSync(dist, { recursive: true, force: true }); fs.mkdirSync(dist, { recursive: true }); execFileSync(tar, ['-xf', zip, '-C', dist], { windowsHide: true, stdio: 'inherit', timeout: 10 * 60e3 }); }
+  catch (e) { console.log(`Windows' tar could not unpack it: ${e.message}.`); return false; }
+  if (!fs.existsSync(ELECTRON)) { console.log('Unpacked, but electron.exe is not in it.'); return false; }
+  fs.writeFileSync(path.join(dir, 'path.txt'), 'electron.exe');
+  console.log(`Unpacked Electron ${ver} with Windows' tar (from ${zip}).`);
+  return true;
 }
 
 // ---- doctor: every check an AI would make by hand, in plain words, with the fix beside each ----
@@ -173,7 +206,8 @@ async function doctor() {
   const ok = [], bad = [], out = (good, what, fix) => (good ? ok : bad).push(good ? `  ok  ${what}` : `  !!  ${what}\n      fix: ${fix}`), note = s => ok.push('  ..  ' + s);
   const norm = p => path.resolve(String(p || '')).toLowerCase();
   out(process.platform === 'win32', `Windows (this is ${process.platform})`, 'The bubble is written for Windows. Say so plainly to your person; on a Mac or Linux the window may run, but following them, setup and "Open this chat" will not.');
-  out(Number(process.versions.node.split('.')[0]) >= 18, `Node ${process.versions.node}`, 'Node 18 or newer is needed (the bubble uses fetch). Install the LTS from nodejs.org.');
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  out(nodeMajor >= 18, `Node ${process.versions.node}${TESTED_NODE.includes(nodeMajor) ? '' : ' (newer than any Node this was tested on; if something odd happens, that is the first suspect)'}`, 'Node 18 or newer is needed (the bubble uses fetch). Install the LTS from nodejs.org.');
   out(fs.existsSync(ELECTRON), 'Installed (the window part, Electron)', '`npm run setup` in this folder.');
   const cfg = readJSON(path.join(DATA, 'config.json'), null);
   out(!!cfg?.home, `Set up${cfg?.name ? ` for ${cfg.name}` : ''}`, '`node bubble.mjs setup --home "<your folder>" --name "<your name>"`.');
@@ -215,7 +249,7 @@ async function doctor() {
   }
   if (process.platform === 'win32' && fs.existsSync(STARTUP)) {
     const v = fs.readFileSync(STARTUP, 'utf8');
-    out(v.toLowerCase().includes(ROOT.toLowerCase()), 'Starts with the PC', `The startup file points at another copy of the bubble (${STARTUP}). Run setup again here with --startup, or delete that file.`);
+    out(v.toLowerCase().includes(ROOT.toLowerCase()), 'Starts with the PC', `The startup file points at an old copy of the bubble (${STARTUP}). Run \`node bubble.mjs setup\` again here: it points it at this copy. (Deleting it yourself is usually refused by the app, so don't try that first.)`);
   }
   if (process.env.BUBBLE_QUIET) note('BUBBLE_QUIET is set in this shell, so hooks run from here stay off the bubble on purpose.');
   const log = (() => { try { return fs.readFileSync(path.join(DATA, 'bubble.log'), 'utf8').trim().split('\n'); } catch { return []; } })();
@@ -248,7 +282,11 @@ switch (cmd) {
     const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spot ? { op: 'come', where: 'spot', x, y } : { op: 'come', where: plain[0] || 'front' }), signal: AbortSignal.timeout(8000) }).then(r => r.json()).catch(() => null);
     console.log(r?.at ? `came to ${r.at.x},${r.at.y}` : downWhy()); break; }
   case 'hook': await hook(args[1]); break;
-  case 'install': install(); break;
+  case 'install': if (args.includes('--tar-only')) { if (!(await unpackElectron(path.join(ROOT, 'app')))) process.exitCode = 1; } else await install(); break;
+  // The exact line for your person, when the app's safety check won't let you change your own settings (see CLAUDE.md).
+  case 'line': { const old = readJSON(path.join(DATA, 'config.json'), {}); const home = flag('home') ? path.resolve(flag('home')) : old.home;
+    if (!home) { console.log('line --home "<your folder>" --name "<your name>" [--color "#hex"] [--face <picture>] [--startup]'); process.exitCode = 1; break; }
+    console.log(personLine(home, flag('name') || old.name || 'Claude', flag('color') || old.color, flag('face') ? path.resolve(flag('face')) : old.face, args.includes('--startup'))); break; }
   case 'setup': {
     const old = readJSON(path.join(DATA, 'config.json'), {});
     const home = flag('home') ? path.resolve(flag('home')) : old.home;
@@ -260,7 +298,9 @@ switch (cmd) {
     fs.mkdirSync(DATA, { recursive: true }); fs.writeFileSync(path.join(DATA, 'config.json'), JSON.stringify(cfg, null, 1));
     let f = null, s = null;
     try { f = hooksInto(home, true); } catch (e) { console.log(`Could not add the hooks to ${path.join(home, '.claude', 'settings.json')}: ${e.message}`); }
-    if (args.includes('--startup')) { try { s = startupFile(true); } catch (e) { console.log(`Could not add it to Windows startup: ${e.message}`); } }
+    // A startup file left by an older copy (the bubble was moved) gets pointed here too: the person chose startup once already.
+    const staleStartup = (() => { try { const v = fs.readFileSync(STARTUP, 'utf8').toLowerCase(); return /the-bubble|bubble/.test(v) && !v.includes(ROOT.toLowerCase()); } catch { return false; } })();
+    if (args.includes('--startup') || staleStartup) { try { s = startupFile(true); if (staleStartup) console.log('The startup file pointed at an old copy of the bubble; it points here now.'); } catch (e) { console.log(`Could not add it to Windows startup: ${e.message}`); } }
     console.log(`Set up for ${cfg.name} in ${home}.\n  hooks: ${f || 'NOT added'}\n  starts: ${s ? 'with the PC, and' : ''} whenever your person sends you a message\n  Claude Code: ${cfg.claude || 'not found (only "Open this chat" on calls needs it)'}`);
     await start();
     console.log('Next: `node bubble.mjs doctor`, then `node bubble.mjs tour` while your person watches. Your hooks may only take effect from your next chat.');

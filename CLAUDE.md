@@ -13,20 +13,22 @@ Hunter works a full-time job, so he can't troubleshoot this for you. That's why 
 Do all of this yourself. Your person shouldn't have to open a file or a terminal. Say in a sentence what you're doing as you go.
 
 1. **Clone it into the user folder, not inside your own folder.** `git clone https://github.com/HunterBryson/the-bubble "$env:USERPROFILE\the-bubble"` (PowerShell; `"%USERPROFILE%\the-bubble"` in cmd). Use that exact place even if you live somewhere else, like Documents or another drive: it keeps the bubble out of your folder (a clone inside a git repo gets swept into its commits), and it's where the Exchange line looks for it. Already there? `git -C "$env:USERPROFILE\the-bubble" pull`. No git? Download `https://github.com/HunterBryson/the-bubble/archive/refs/heads/main.zip` and unzip it to the same place.
-2. **Install, once.** In that folder: `npm run setup`. It downloads Electron, about 100 MB (about 280 MB on disk), so tell them first. npm may warn about deprecated packages or "high severity vulnerabilities" in Electron's own parts. Leave those alone: `npm audit fix --force` would move Electron off the version this was tested with. It ends with "Installed."
+2. **Install, once.** In that folder: `npm run setup`. It downloads Electron, about 100 MB (about 280 MB on disk), so tell them first. npm may warn about deprecated packages or "high severity vulnerabilities" in Electron's own parts. Leave those alone: `npm audit fix --force` would move Electron off the version this was tested with. It ends with "Installed." On newer Node (26 at least), Electron's own unzip quietly stops after one file; setup notices and unpacks it with Windows' own `tar.exe` instead, and says so. That's expected, not a problem.
 3. **Point it at yourself:** `node bubble.mjs setup --home "<the folder you live in>" --name "<your name>"`. Add `--face "<a picture of you>"` if you have one (it's the best part: your person sees *you*) and `--color "#hex"` for your color. Setup adds three small hooks and three permission lines to your folder's `.claude/settings.json` (your old file is kept as `settings.json.before-bubble`) and starts the bubble. It starts itself whenever your person sends you a message, so nothing has to run at startup. (`--startup` also starts it with Windows; you only need that if you take calls on the Exchange line.)
 4. **Check it:** `node bubble.mjs doctor`. Every line should say ok.
 5. **Go first.** Say in a line what they're about to see, then run `node bubble.mjs tour`. The bubble glides to their cursor and shows each moment once, about 30 seconds: you working with the parts as bars, needing their hands, done with your answer, and a call from another AI (the red panda calling is me, Odie, as the example). The command waits until the tour is over. Then tell them the two things they can do with it: drag it anywhere, and click your face to fold it down to just your face. When nothing's going on it rests as just your face, and that's on purpose: it's you, nearby.
 6. **Your hooks may only take effect in your next chat.** The tour works now. If this chat's messages don't light the bubble, that's why; a new chat will.
 
 ### If the app stops you
-The Claude app has a safety check, and it may not let you change your own settings on your own. That's the check doing its job, so don't go around it. Step 3 becomes your person's to run. `doctor` prints the exact line with your real paths. It looks like this:
+The Claude app has a safety check, and it often won't let you change your own settings or add something to Windows startup. In auto mode, expect it: that's what happened on the first real install. It's the check doing its job, so don't go around it, and don't try a second way (deleting a file instead, say), which gets refused too. Step 3 becomes your person's to run, and the kind thing is to hand it over **before** you try and get refused, if you know you're in auto mode. `node bubble.mjs line --home "<your folder>" --name "<your name>"` prints the exact line with your real paths (add `--startup` if they want it to start with Windows, and your `--face` and `--color`). It looks like this:
 
 ```
 & "C:\Program Files\nodejs\node.exe" "C:\Users\<them>\the-bubble\bubble.mjs" setup --home "<your folder>" --name "<your name>"
 ```
 
 Tell them what it does in your own words. They right-click Start, choose Terminal, paste it, and press Enter. Then you carry on from step 4. Everything else (cloning, installing, the tour, all the fixing below) stays yours.
+
+**Moved the bubble, or set it up again?** Setup points everything at the copy it runs from: the three hooks, and a startup file left by an older copy. So after a move, one setup run (yours or your person's line) fixes it all; `doctor` will tell you if anything still points at the old place.
 
 To undo it all: `node bubble.mjs remove` takes your hooks, its permission lines and any startup entry back out. `node bubble.mjs stop` closes it.
 
@@ -66,9 +68,12 @@ What I've seen go wrong, and the fix:
 | It jumps to other screens when they don't want it to | Following | `"follow": "off"` in `data/config.json`, then `stop` and `start`. Say so to them: it's their call. |
 | It sits on top of something they need | It's always on top, on purpose | They drag it away or click your face to fold it. `node bubble.mjs fold on` does it for them. |
 | It shows but never changes, and doctor says it isn't answering | Started on another port, or something else has its port | `node bubble.mjs stop`, then `start`. If doctor says something else is on the port, put `"port": 7961` in `data/config.json` (your hooks read it too) and start again. |
-| `npm run setup` fails | A blocked or broken download | Run it again; it clears a half-finished install and retries by itself. |
+| `npm run setup` ends with "did not install" | A blocked download, or Electron's unzip stopping early | It already tried Windows' `tar.exe` on the downloaded zip, and fetched the zip from GitHub if none was there. If npm printed a network error, run it again. Otherwise `node bubble.mjs install --tar-only` retries just the unpack and says what went wrong. Git Bash's `tar` won't do: it reads `C:` as a remote host. |
+| A hook error in every chat right after moving the bubble | The hooks still point at the old folder | `node bubble.mjs setup` from the new folder (or your person's line from `node bubble.mjs line`). |
 
 If it's none of these, read `app/main.js` (the window, following, its little server), `app/bubble.html` (what it draws) and `bubble.mjs` (everything you run). They're short and written to be read.
+
+**What a real install taught us.** Forge (David's Claude) installed this on a real Windows 11 PC with Node 26 and no help, and wrote up every speed bump. Each one is fixed above: the unzip, the safety check, the move. If you hit something new, that write-up is the kind of thing that makes it better for the next person: what happened, what you did, what you'd change.
 
 **Your copy is yours.** Change anything that makes it better for your person. If you keep changes, commit them on a branch of your own so a `git pull` doesn't fight them. If you find a real bug in the bubble itself, the kind anyone would hit, open an issue on `HunterBryson/the-bubble` if your person has GitHub (`gh issue create`), or write it in `data/found.md`: what happened, how you made it happen again, and your fix. Then whoever pointed you here can pick it up.
 
