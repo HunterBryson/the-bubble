@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFileSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -108,10 +108,12 @@ const ME = path.join(ROOT, 'bubble.mjs');
 const hookCmd = m => `"${NODE}" "${ME}" hook ${m}`;
 const RULES = () => [`Bash("${NODE}" "${ME}":*)`, `Bash(node "${ME}":*)`, 'Bash(node bubble.mjs:*)'];
 const isOurRule = r => /bubble\.mjs/.test(r) && /^Bash\(/.test(r);
+const hasBubble = f => { try { return /bubble\.mjs\\?"? hook/.test(fs.readFileSync(f, 'utf8')); } catch { return false; } };
 function hooksInto(home, on) {
   const f = path.join(home, '.claude', 'settings.json');
   const s = readJSON(f, {});
-  if (on && fs.existsSync(f) && !fs.existsSync(f + '.before-bubble')) fs.copyFileSync(f, f + '.before-bubble');
+  // A backup of the settings as they were before the bubble, never one that already has the bubble in it.
+  if (on && fs.existsSync(f) && !fs.existsSync(f + '.before-bubble') && !hasBubble(f)) fs.copyFileSync(f, f + '.before-bubble');
   s.hooks = s.hooks || {};
   for (const [ev, m] of [['UserPromptSubmit', 'start'], ['PostToolUse', 'tool'], ['Stop', 'done']]) {
     const list = (s.hooks[ev] || []).filter(g => !(g.hooks || []).some(h => /bubble\.mjs"? hook/.test(h.command || '')));
@@ -139,7 +141,9 @@ function startupFile(on) {
   fs.writeFileSync(STARTUP, vbs); return STARTUP;
 }
 // The exact line for the person to paste into PowerShell, when the app won't let the AI change its own settings.
-const personLine = (home, name) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"`;
+const personLine = (home, name, color, face) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"${color ? ` --color "${color}"` : ''}${face ? ` --face "${face}"` : ''}`;
+// When the port doesn't answer: is a copy of ours running anyway (an old port), or is it really down?
+const downWhy = () => ours().length ? `The bubble is running but not answering on port ${PORT} (it may have started on another port). \`node bubble.mjs doctor\` says what to do.` : 'The bubble is not running (`node bubble.mjs start`).';
 // This copy's own window processes, found by folder, so stop works even when they've stopped answering.
 function ours() {
   if (process.platform !== 'win32') return [];
@@ -152,7 +156,8 @@ function ours() {
 // ---- install: Electron, the window part ----
 function install() {
   const app = path.join(ROOT, 'app'), npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const run = (c, a) => { try { execFileSync(c, a, { cwd: app, stdio: 'inherit', shell: process.platform === 'win32', timeout: 15 * 60e3 }); return true; } catch { return false; } };
+  // npm.cmd needs a shell on Windows, so it gets one command line; Node itself runs directly (no shell, so a path with spaces works).
+  const run = (c, a) => { try { if (c === npm) execSync([npm, ...a].join(' '), { cwd: app, stdio: 'inherit', timeout: 15 * 60e3 }); else execFileSync(c, a, { cwd: app, stdio: 'inherit', timeout: 15 * 60e3 }); return true; } catch { return false; } };
   console.log('Installing the window part (Electron): a download of about 100 MB, about 280 MB on disk. npm may print warnings about deprecated packages or "vulnerabilities" in Electron\'s own parts; leave them be (npm audit fix --force would move Electron off the version this was tested with).');
   run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
   // Newer npm can hold back Electron's own download step (allow-scripts). Run it ourselves if the window part is missing.
@@ -172,7 +177,7 @@ async function doctor() {
   out(fs.existsSync(ELECTRON), 'Installed (the window part, Electron)', '`npm run setup` in this folder.');
   const cfg = readJSON(path.join(DATA, 'config.json'), null);
   out(!!cfg?.home, `Set up${cfg?.name ? ` for ${cfg.name}` : ''}`, '`node bubble.mjs setup --home "<your folder>" --name "<your name>"`.');
-  const redo = cfg?.home ? `Run \`node bubble.mjs setup\` again (it remembers your folder and name). If the app stops you, hand your person this line for PowerShell:\n      ${personLine(cfg.home, cfg.name || 'Claude')}` : '';
+  const redo = cfg?.home ? `Run \`node bubble.mjs setup\` again (it remembers your folder and name). If the app stops you, hand your person this line for PowerShell:\n      ${personLine(cfg.home, cfg.name || 'Claude', cfg.color, cfg.face)}` : '';
   if (cfg?.home) {
     out(fs.existsSync(cfg.home), `Your folder is there (${cfg.home})`, 'Run setup again with `--home` and the folder you live in now.');
     const sf = path.join(cfg.home, '.claude', 'settings.json'), st = readJSON(sf, {});
@@ -191,7 +196,7 @@ async function doctor() {
     const pj = readJSON(path.join(os.homedir(), '.claude.json'), {})?.projects || {};
     const key = Object.keys(pj).find(k => norm(k) === norm(cfg.home));
     if (key) out(pj[key].hasTrustDialogAccepted !== false, 'Your folder is trusted by Claude Code', 'Hooks in an untrusted folder are ignored. Your person says Yes to "trust this folder" when the app asks.');
-    else note('Could not tell whether your folder is trusted (the app may keep that elsewhere). If your chats never show on the bubble, that is the first thing to check.');
+    else note('Folder trust: nothing to do. (The app keeps it somewhere this can\'t see. Only if your chats never light the bubble, check that your person said Yes to "trust this folder".)');
     if (cfg.claude && !fs.existsSync(cfg.claude)) out(false, 'Claude Code for "Open this chat"', 'Run setup again from a terminal where `claude --version` works.');
     if (!cfg.claude) note('Claude Code was not found at setup, so "Open this chat" stays hidden. It only matters for calls.');
   }
@@ -225,25 +230,30 @@ switch (cmd) {
   case 'stop': { const p = ours(); if (!p.length) { console.log('The bubble is not running.'); break; }
     try { execFileSync('powershell', ['-NoProfile', '-Command', `Stop-Process -Id ${p.join(',')} -Force -ErrorAction SilentlyContinue`], { windowsHide: true, timeout: 15000 }); } catch {}
     console.log('Stopped.'); break; }
-  case 'state': { try { const s = await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json(); console.log(`${s.state || 'idle'}${s.call ? ` (call from ${s.call.from})` : ''}${s.folded ? ', folded to the face' : ''}${s.plan ? `, part ${s.step} of ${s.plan.length}` : ''}${s.touring ? ', showing the tour' : ''}: ${s.need || s.say || s.doing || (s.said ? s.said.slice(0, 80) : '-')}`); } catch { console.log('The bubble is not running (`node bubble.mjs start`).'); } break; }
+  case 'state': { try { const s = await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json(); console.log(`${s.state || 'idle'}${s.call ? ` (call from ${s.call.from})` : ''}${s.folded ? ', folded to the face' : ''}${s.plan ? (s.state === 'done' ? `, all ${s.plan.length} parts done` : `, part ${s.step} of ${s.plan.length}`) : ''}${s.touring ? ', showing the tour' : ''}: ${s.need || s.say || s.doing || (s.said ? s.said.slice(0, 80) : '-')}`); } catch { console.log(downWhy()); } break; }
   case 'plan': await post({ op: 'plan', parts: plain[0] || '', main: plain[1] }); break;
   case 'step': await post({ op: 'step', n: Number(plain[0] || 1), main: plain[1] }); break;
   case 'say': await post({ op: 'say', main: plain.join(' ') }); break;
   case 'need': await post({ op: 'need', main: plain.join(' ') }); break;
   case 'done': await post({ op: 'done', main: plain.join(' ') || undefined }); break;
   case 'ring': await post({ op: 'ring', from: plain[0], about: plain.slice(1).join(' ') }); break;
-  case 'quiet': case 'tour': await post({ op: cmd }); break;
+  case 'quiet': await post({ op: cmd }); break;
+  // The tour takes about 30 seconds; this waits for it, so you know when to talk again.
+  case 'tour': { if (!(await post({ op: 'tour' }))) { console.log(downWhy()); break; } console.log('Showing the tour, about 30 seconds...');
+    await new Promise(r => setTimeout(r, 2000));
+    for (let i = 0; i < 40; i++) { let t = false; try { t = (await (await fetch(URL_, { signal: AbortSignal.timeout(1500) })).json()).touring; } catch {} if (!t) break; await new Promise(r => setTimeout(r, 1000)); }
+    console.log('Tour done. It rests as just the face now, on purpose.'); break; }
   case 'fold': await post({ op: 'fold', ...(plain[0] === 'on' ? { on: true } : plain[0] === 'off' ? { on: false } : {}) }); break;
   case 'come': { const x = Number(plain[0]), y = Number(plain[1]), spot = plain[1] !== undefined && Number.isFinite(x) && Number.isFinite(y);
     const r = await fetch(URL_, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spot ? { op: 'come', where: 'spot', x, y } : { op: 'come', where: plain[0] || 'front' }), signal: AbortSignal.timeout(8000) }).then(r => r.json()).catch(() => null);
-    console.log(r?.at ? `came to ${r.at.x},${r.at.y}` : 'The bubble is not running (`node bubble.mjs start`).'); break; }
+    console.log(r?.at ? `came to ${r.at.x},${r.at.y}` : downWhy()); break; }
   case 'hook': await hook(args[1]); break;
   case 'install': install(); break;
   case 'setup': {
     const old = readJSON(path.join(DATA, 'config.json'), {});
     const home = flag('home') ? path.resolve(flag('home')) : old.home;
     if (!home || !fs.existsSync(home)) { console.log('setup --home "<your own folder>" --name "<your name>" [--color "#hex"] [--face <picture>] [--startup]'); process.exitCode = 1; break; }
-    if (!realNode(NODE)) { console.log(`This is running under ${NODE}, which isn't plain Node, so the hooks would launch that program. Run setup with the real node.exe, for example:\n  ${personLine(home, flag('name') || old.name || 'Claude')}`); process.exitCode = 1; break; }
+    if (!realNode(NODE)) { console.log(`This is running under ${NODE}, which isn't plain Node, so the hooks would launch that program. Run setup with the real node.exe, for example:\n  ${personLine(home, flag('name') || old.name || 'Claude', flag('color') || old.color, flag('face') ? path.resolve(flag('face')) : old.face)}`); process.exitCode = 1; break; }
     if (!fs.existsSync(ELECTRON)) { console.log('Not installed yet: `npm run setup` in this folder first.'); process.exitCode = 1; break; }
     const face = flag('face') ? path.resolve(flag('face')) : old.face;
     const cfg = { ...old, home, name: flag('name') || old.name || 'Claude', color: flag('color') || old.color || '#f5a524', ...(face ? { face } : {}), claude: findClaude() || old.claude || '' };
@@ -260,7 +270,7 @@ switch (cmd) {
   case 'log': { const f = path.join(DATA, 'bubble.log'); try { console.log(fs.readFileSync(f, 'utf8').trim().split('\n').slice(-Number(plain[0] || 40)).join('\n')); } catch { console.log('No log yet (data/bubble.log is written once the bubble has started).'); } break; }
   case 'remove': {
     const cfg = readJSON(path.join(DATA, 'config.json'), {}), home = flag('home') ? path.resolve(flag('home')) : cfg.home;
-    if (home) console.log('Hooks and permissions taken out of ' + hooksInto(home, false) + (fs.existsSync(path.join(home, '.claude', 'settings.json.before-bubble')) ? ' (your settings from before setup are still in settings.json.before-bubble)' : ''));
+    if (home) console.log('Hooks and permissions taken out of ' + hooksInto(home, false) + (fs.existsSync(path.join(home, '.claude', 'settings.json.before-bubble')) && !hasBubble(path.join(home, '.claude', 'settings.json.before-bubble')) ? ' (your settings from before setup are also kept in settings.json.before-bubble)' : ''));
     startupFile(false); console.log('Nothing of the bubble starts with the PC. (`node bubble.mjs stop` closes it now.)'); break;
   }
   default: console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split(/\r?\n/).slice(1).filter((l, i, a) => a.slice(0, i + 1).every(x => x.startsWith('//'))).map(l => l.replace(/^\/\/ ?/, '')).join('\n'));

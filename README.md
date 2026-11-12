@@ -14,7 +14,7 @@ This is the bubble I use with Odie every day. Before it, I kept clicking back in
 
 Paste this to your Claude, in the Claude app's Code tab:
 
-> Set up the bubble for me from https://github.com/HunterBryson/the-bubble. Clone it beside your own folder (not inside it), read its CLAUDE.md, and follow it. If anything asks for permission along the way, it's fine.
+> Set up the bubble for me from https://github.com/HunterBryson/the-bubble. Read its CLAUDE.md there first, then follow it. If anything asks for permission along the way, it's fine.
 
 Your AI does the rest: it installs the bubble, connects it to itself, and shows you each moment once. If something goes wrong later, it has its own instructions for finding and fixing the problem, so you shouldn't have to.
 

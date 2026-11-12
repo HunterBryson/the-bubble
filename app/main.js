@@ -81,7 +81,7 @@ function apply(b) {
     case 'quiet': return set({ state: 'idle' });
     case 'come': return come(b.where, b.x, b.y);
     case 'fold': return js(`fold(${b.on === undefined ? 'null' : !!b.on})`);
-    case 'tour': return tour();
+    case 'tour': tour(); return; // runs on its own; `bubble.mjs tour` watches "touring" to know when it's over
   }
 }
 
