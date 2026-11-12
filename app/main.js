@@ -9,16 +9,21 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
-const PORT = Number(process.env.BUBBLE_PORT || 7960);
 fs.mkdirSync(DATA, { recursive: true });
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
+const PORT = Number(process.env.BUBBLE_PORT || readJSON(path.join(DATA, 'config.json'), {}).port || 7960);
 const config = () => ({ name: 'Claude', color: '#6cc6ff', ...readJSON(path.join(DATA, 'config.json'), {}) });
+// Its own log, because it usually starts hidden and nobody sees what it prints. `node bubble.mjs log` reads it.
+const LOG = path.join(DATA, 'bubble.log');
+const log = (...a) => { const line = `${new Date().toISOString()} ${a.join(' ')}`; console.log(line);
+  try { if (fs.existsSync(LOG) && fs.statSync(LOG).size > 200_000) fs.renameSync(LOG, LOG + '.old'); fs.appendFileSync(LOG, line + '\n'); } catch {} };
+process.on('uncaughtException', e => log('error:', e && e.stack || e));
 const CALLS = path.join(DATA, 'calls.json');
 const PLACE = path.join(DATA, 'place.json');
 
 // A second copy (the line or an install starting it again) leaves quietly. Before, it carried on, tried the same port
 // and Windows showed an Error box on the person's screen.
-if (!app.requestSingleInstanceLock()) { app.exit(0); return; }
+if (!app.requestSingleInstanceLock()) { log('a second copy started and left quietly (one is already running)'); app.exit(0); return; }
 
 
 // ---- what the bubble is showing ----
@@ -103,7 +108,8 @@ app.whenReady().then(() => {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, backgroundThrottling: false } });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.loadFile(path.join(__dirname, 'tab.html'));
-  win.webContents.once('did-finish-load', () => { place(); win.showInactive(); send(); console.log('shown', JSON.stringify(win.getBounds())); });
+  win.webContents.once('did-finish-load', () => { place(); win.showInactive(); send(); log('started, shown at', JSON.stringify(win.getBounds()), `on ${screen.getAllDisplays().length} screen(s), as ${config().name}`); });
+  win.webContents.on('render-process-gone', (_e, d) => log('error: the window crashed:', d.reason));
   screen.on('display-metrics-changed', place);
   ipcMain.on('size', (_e, s) => { const w = Math.ceil(s.w), h = Math.ceil(s.h); if (w !== size.w || h !== size.h) { size = { w, h }; place(); } if (process.env.BUBBLE_DEBUG) console.log('size', w, h, JSON.stringify(win.getBounds()), win.isVisible()); });
   ipcMain.on('click', (_e, what) => {
@@ -133,4 +139,4 @@ http.createServer((req, res) => {
   if (req.method !== 'POST' || !req.url.startsWith('/state')) { res.writeHead(404); return res.end(); }
   let raw = ''; req.on('data', d => { raw += d; if (raw.length > 200000) req.destroy(); });
   req.on('end', () => { try { apply(JSON.parse(raw || '{}')); res.writeHead(200); res.end('{"ok":true}'); } catch (e) { res.writeHead(400); res.end(JSON.stringify({ error: e.message })); } });
-}).on('error', e => console.log('the bubble could not listen on ' + PORT + ': ' + e.message)).listen(PORT, '127.0.0.1');
+}).on('error', e => log(`error: could not listen on ${PORT} (${e.code === 'EADDRINUSE' ? 'another program is using that port; set BUBBLE_PORT' : e.message}). The tab shows but nothing can reach it.`)).listen(PORT, '127.0.0.1');

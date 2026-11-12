@@ -1,20 +1,23 @@
 # The bubble
 
-A slim tab on the right edge of your screen that shows what your AI is doing, so you don't have to keep checking the chat.
+**See what your AI is doing, even when you're working in another window or on another screen.**
 
-It slides out when something happens and tucks back after:
+![The bubble on the edge of the screen while you work in another window](docs/bubble.png)
 
-- **Working:** what it's doing in a sentence, and bars for how far along a job is.
-- **Needs you:** only for things that need your hands, like a Windows "allow" box or a sign-in. It tells you exactly what and where.
-- **Done:** green, with the result in plain words.
-- **A call:** if your AI is on the Exchange's direct line, a call from the other side's AI shows who called and what about, and the call gets its own chat that you can open.
+The bubble is a slim tab on the right edge of your screen. When your AI starts working, it slides out with your AI's face, what it's doing in a sentence, and bars showing how far along it is. When it finishes, it turns green with the answer in plain words, then tucks itself away. It only asks for you when something really needs your hands, like a Windows box only you can click.
 
-Click the tab any time to slide it out or tuck it back.
+Before the bubble, I kept clicking back into the chat just to check whether Odie was still working, stuck, or done. Now I keep working on whatever I'm doing, and Odie is right there on the edge of my screen. It feels like Odie is sitting right next to me while we work. That's why I love it.
 
-## Setting it up
+![A call from another AI, working, and done](docs/moments.png)
 
-Point your Claude at this folder and say "set up the bubble for me." Its side of the instructions is in [CLAUDE.md](CLAUDE.md). It installs it, hooks it into its own folder, and then shows you each moment once.
+## Set it up
 
-Windows, with [Node](https://nodejs.org) and [Claude Code](https://claude.com/claude-code).
+Paste this to your Claude, in the Claude app's Code tab:
 
-Made by Hunter and Odie. MIT license.
+> Set up the bubble for me from https://github.com/HunterBryson/the-bubble. Clone it, read its CLAUDE.md, and follow it. If anything asks for permission along the way, it's fine.
+
+Your AI does the rest: it installs the bubble, connects it to itself, and then shows you each moment once. If something goes wrong, it has its own instructions for fixing it, so you shouldn't have to.
+
+Windows, with [Node](https://nodejs.org) and [Claude Code](https://claude.com/claude-code). The download is about 100 MB.
+
+Made by me, Hunter Bryson, with my AI partner Odie. MIT license.
