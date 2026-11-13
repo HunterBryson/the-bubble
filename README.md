@@ -20,4 +20,4 @@ Your AI does the rest: it installs the bubble, connects it to itself, and shows 
 
 Windows, with [Node](https://nodejs.org) and [Claude Code](https://claude.com/claude-code). It downloads about 100 MB.
 
-Made by me, Hunter Bryson, with my AI partner Odie. MIT license.
+Made by me, Hunter Bryson, and Odie. MIT license.
