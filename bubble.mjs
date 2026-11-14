@@ -12,8 +12,8 @@
 //   node bubble.mjs quiet | fold | tour            back to resting · fold to just the face (or open it) · show every moment once
 //   node bubble.mjs hook start|tool|done           what the AI's hooks run (reads the hook's input on stdin)
 //   node bubble.mjs install                         the window part (Electron); what `npm run setup` runs
-//   node bubble.mjs setup --home "<the AI's folder>" --name Forge [--color "#f5a524"] [--face pic.png] [--startup]
-//   node bubble.mjs line --home "<folder>" --name Forge [--startup]   the one line your person pastes, if the app won't let you run setup
+//   node bubble.mjs setup --home "<the AI's folder>" --name Max [--color "#f5a524"] [--face pic.png] [--startup]
+//   node bubble.mjs line --home "<folder>" --name Max [--startup]   the one line your person pastes, if the app won't let you run setup
 //   node bubble.mjs remove [--home "<folder>"]     undo setup: hooks and permissions out, nothing at startup
 //   node bubble.mjs doctor | log [n]               something's off? every check in plain words, with the fix · the window's own log
 //
@@ -143,7 +143,7 @@ function startupFile(on) {
 }
 // The exact line for the person to paste into PowerShell, when the app won't let the AI change its own settings.
 const personLine = (home, name, color, face, startup) => `& "${realNode(NODE) ? NODE : 'C:\\Program Files\\nodejs\\node.exe'}" "${ME}" setup --home "${home}" --name "${name}"${color ? ` --color "${color}"` : ''}${face ? ` --face "${face}"` : ''}${startup ? ' --startup' : ''}`;
-// Forge tested Electron 33.2.0 under Node 26 (Nov 12): the unzip needed Windows' tar, which install now does by itself.
+// A real install tested Electron 33.2.0 under Node 26 (Nov 12): the unzip needed Windows' tar, which install now does by itself.
 const TESTED_NODE = [18, 20, 22, 24, 26];
 // When the port doesn't answer: is a copy of ours running anyway (an old port), or is it really down?
 const downWhy = () => ours().length ? `The bubble is running but not answering on port ${PORT} (it may have started on another port). \`node bubble.mjs doctor\` says what to do.` : 'The bubble is not running (`node bubble.mjs start`).';
@@ -165,8 +165,8 @@ async function install() {
   run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);
   // Newer npm can hold back Electron's own download step (allow-scripts). Run it ourselves if the window part is missing.
   if (!fs.existsSync(ELECTRON) && fs.existsSync(path.join(app, 'node_modules', 'electron', 'install.js'))) { console.log('Fetching Electron itself...'); run(process.execPath, ['node_modules/electron/install.js']); }
-  // Electron's own unzip (extract-zip/yauzl) can stop after one file and still exit 0, with no error: Forge found this on
-  // his dad's PC under Node 26 (Nov 12), on every install. Running npm again only repeats it. So when the window part is
+  // Electron's own unzip (extract-zip/yauzl) can stop after one file and still exit 0, with no error: a real install found this on
+  // a Windows PC under Node 26 (Nov 12), on every install. Running npm again only repeats it. So when the window part is
   // still missing, unpack the zip ourselves with Windows' own tar.exe, which is on every Windows 10 and 11.
   if (!fs.existsSync(ELECTRON) && process.platform === 'win32' && fs.existsSync(path.join(app, 'node_modules', 'electron', 'package.json'))) await unpackElectron(app);
   if (!fs.existsSync(ELECTRON)) { console.log('Clearing a half-finished install and trying once more...'); try { fs.rmSync(path.join(app, 'node_modules'), { recursive: true, force: true }); } catch {} run(npm, ['ci', '--no-audit', '--no-fund', '--loglevel=error']);

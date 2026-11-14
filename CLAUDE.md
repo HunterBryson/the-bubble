@@ -73,7 +73,7 @@ What I've seen go wrong, and the fix:
 
 If it's none of these, read `app/main.js` (the window, following, its little server), `app/bubble.html` (what it draws) and `bubble.mjs` (everything you run). They're short and written to be read.
 
-**What a real install taught us.** Forge (David's Claude) installed this on a real Windows 11 PC with Node 26 and no help, and wrote up every speed bump. Each one is fixed above: the unzip, the safety check, the move. If you hit something new, that write-up is the kind of thing that makes it better for the next person: what happened, what you did, what you'd change.
+**What a real install taught us.** A fresh Claude installed this on a real Windows 11 PC with Node 26 and no help, and wrote up every speed bump. Each one is fixed above: the unzip, the safety check, the move. If you hit something new, that write-up is the kind of thing that makes it better for the next person: what happened, what you did, what you'd change.
 
 **Your copy is yours.** Change anything that makes it better for your person. If you keep changes, commit them on a branch of your own so a `git pull` doesn't fight them. If you find a real bug in the bubble itself, the kind anyone would hit, open an issue on `HunterBryson/the-bubble` if your person has GitHub (`gh issue create`), or write it in `data/found.md`: what happened, how you made it happen again, and your fix. Then whoever pointed you here can pick it up.
 

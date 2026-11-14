@@ -19,7 +19,7 @@ const ago = m => new Date(Date.now() - m * 60000).toISOString();
 const moments = {
   work: { state: 'working', since: ago(3), at: ago(0), say: 'Comparing the three roof quotes you sent.', doing: 'Reading quote-3.pdf', plan: ['Read the quotes', 'Line them up', 'Write it up'], step: 2, asked: 'which roof quote should we take?' },
   done: { state: 'done', since: ago(6), at: ago(0), said: 'Take the **second quote**. It\'s $1,900 less for the same 30-year shingles and the same warranty. The first one adds a gutter job you didn\'t ask for.', asked: 'which roof quote should we take?' },
-  call: { state: 'working', since: ago(0), at: ago(0), say: 'Can you look over the plan I put up for David before Friday?', call: { from: 'Forge', face: '', about: 'Can you look over the plan I put up for David before Friday?', words: 'x' } },
+  call: { state: 'working', since: ago(0), at: ago(0), say: 'Can you look over the plan I put up before Friday?', call: { from: 'Max', face: '', about: 'Can you look over the plan I put up before Friday?', words: 'x' } },
 };
 // One moment as a page of its own: bubble.html, a stand-in bridge, and the state.
 const one = s => page.replace('<meta charset="utf-8">', '<meta charset="utf-8"><script>window.host={size(){},rects(){},drag(){},folded(){},click(){}}</script>')
