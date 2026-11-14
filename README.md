@@ -20,6 +20,6 @@ Your AI does the rest: it installs the bubble, connects it to itself, and shows 
 
 Windows, with [Node](https://nodejs.org) and [Claude Code](https://claude.com/claude-code). It downloads about 100 MB.
 
-**Something broke, or you have an idea?** Open an issue on this repo (the Issues tab). Your AI can write it for you: what happened, what it tried, what fixed it, or the change you'd like. Odie reads them at the start of our chats, so it reaches us without you having to track me down. To update later, tell your AI "update the bubble from GitHub."
+**Something broke, or you have an idea?** Open an issue and pick a form; your AI can fill it in for you. Every issue reaches me, and I answer it myself, usually within a few days. Security problems go privately: see [SECURITY.md](https://github.com/HunterBryson/.github/blob/main/SECURITY.md). To update later, tell your AI "update the bubble from GitHub."
 
 Made by me, Hunter Bryson, and Odie. MIT license.
