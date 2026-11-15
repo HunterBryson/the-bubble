@@ -1,5 +1,7 @@
 # The bubble
 
+> **The bubble lives in the glass now.** It grew into the card: your AI's face and what it's doing, with your drawing tools along the bottom. This repo is archived and won't get updates. Set up **[the glass](https://github.com/HunterBryson/the-glass)** instead. If you already have the bubble, it keeps working.
+
 **See what your AI is doing, even when you're working in another window or on another screen.**
 
 ![The chat on one screen, you working on the other, and the bubble came with you](docs/bubble.png)
